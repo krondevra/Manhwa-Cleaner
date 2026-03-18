@@ -13,13 +13,13 @@ import os
 #   *_debug_white_safe.png
 #   *_debug_remove_mask.png
 
-THRESH = 210
+THRESH = 195
 
 # Strengthen black contours a little
 CLOSE_KERNEL = (3, 3)
 CLOSE_ITERS = 1
 DILATE_KERNEL = (3, 3)
-DILATE_ITERS = 1
+DILATE_ITERS = 0
 
 # White component filters
 MIN_AREA = 1500
