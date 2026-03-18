@@ -8,3 +8,5 @@ psd/
 __pycache__/
 *.pyc
 .venv/
+/.backup
+/materials
