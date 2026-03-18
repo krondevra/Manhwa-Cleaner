@@ -3,67 +3,72 @@ import numpy as np
 import sys
 
 
-def fill_inside_closed_frames(
+def fill_white_holes_inside_black_objects(
     image_path: str,
-    output_path: str = "filled_frames.png",
+    output_path: str = "filled_output.png",
     threshold_value: int = 250,
     grow_px: int = 1,
+    min_black_area: int = 80,
 ) -> None:
-    """
-    Goal:
-    - use BLUE channel only
-    - threshold at 250
-    - grow black by 1 px
-    - fill only white regions fully enclosed by black outlines
-    - keep white gaps connected to image border white
-    """
-
     img = cv2.imread(image_path, cv2.IMREAD_COLOR)
     if img is None:
         raise FileNotFoundError(f"Cannot open image: {image_path}")
 
-    # OpenCV is BGR, blue channel = 0
     blue = img[:, :, 0]
 
-    # 250 threshold on blue channel
-    # >= 250 -> white, < 250 -> black
+    # Blue channel threshold
     _, bw = cv2.threshold(blue, threshold_value, 255, cv2.THRESH_BINARY)
 
-    # Grow black by 1 px
+    # Black mask
     black = cv2.bitwise_not(bw)
-    kernel = np.ones((2 * grow_px + 1, 2 * grow_px + 1), np.uint8)
-    black = cv2.dilate(black, kernel, iterations=1)
 
-    # Back to normal: black outlines / white background
-    bw = cv2.bitwise_not(black)
+    # Grow black a little to close tiny gaps
+    if grow_px > 0:
+        kernel = np.ones((2 * grow_px + 1, 2 * grow_px + 1), np.uint8)
+        black = cv2.dilate(black, kernel, iterations=1)
 
-    h, w = bw.shape
+    result_black = black.copy()
 
-    # Flood fill ALL white connected to borders.
-    # This preserves white gaps between frames if they are open to border.
-    outside = bw.copy()
-    mask = np.zeros((h + 2, w + 2), np.uint8)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(black, connectivity=8)
 
-    border_points = []
+    for label in range(1, num_labels):
+        x, y, w, h, area = stats[label]
 
-    for x in range(w):
-        border_points.append((x, 0))
-        border_points.append((x, h - 1))
-    for y in range(h):
-        border_points.append((0, y))
-        border_points.append((w - 1, y))
+        if area < min_black_area:
+            continue
 
-    for x, y in border_points:
-        if outside[y, x] == 255:
-            cv2.floodFill(outside, mask, (x, y), 128)
+        component_mask = (labels == label).astype(np.uint8) * 255
 
-    # White regions NOT connected to border = closed frames/boxes/bubbles
-    enclosed_white = (outside == 255)
+        # ROI of this black object
+        roi_mask = component_mask[y:y+h, x:x+w]
 
-    # Fill enclosed white regions with black
-    result = bw.copy()
-    result[enclosed_white] = 0
+        # Invert inside ROI: black object -> 0, surrounding white -> 255
+        roi_inv = cv2.bitwise_not(roi_mask)
 
+        # Flood-fill white from ROI border
+        flood = roi_inv.copy()
+        fh, fw = flood.shape
+        ff_mask = np.zeros((fh + 2, fw + 2), np.uint8)
+
+        border_points = []
+        for xx in range(fw):
+            border_points.append((xx, 0))
+            border_points.append((xx, fh - 1))
+        for yy in range(fh):
+            border_points.append((0, yy))
+            border_points.append((fw - 1, yy))
+
+        for px, py in border_points:
+            if flood[py, px] == 255:
+                cv2.floodFill(flood, ff_mask, (px, py), 128)
+
+        # Remaining white = enclosed white holes inside this black object
+        holes = (flood == 255).astype(np.uint8) * 255
+
+        # Fill those holes with black
+        result_black[y:y+h, x:x+w][holes == 255] = 255
+
+    result = cv2.bitwise_not(result_black)
     cv2.imwrite(output_path, result)
     print(f"Saved: {output_path}")
 
@@ -74,11 +79,12 @@ if __name__ == "__main__":
         sys.exit(1)
 
     input_file = sys.argv[1]
-    output_file = sys.argv[2] if len(sys.argv) > 2 else "filled_frames.png"
+    output_file = sys.argv[2] if len(sys.argv) > 2 else "filled_output.png"
 
-    fill_inside_closed_frames(
-        image_path=input_file,
-        output_path=output_file,
+    fill_white_holes_inside_black_objects(
+        input_file,
+        output_file,
         threshold_value=250,
         grow_px=1,
+        min_black_area=80,
     )
