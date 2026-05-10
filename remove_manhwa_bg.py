@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-v0.2.2 — magic-wand inspired: aggressive flood fill then selective restore.
+v0.3.0 — v3: built on v2, adds row-based content restore and line-panel detection.
 
-Observations from manual workflow (2.png → 5.png):
-  - Magic Wand from edges removes most background correctly.
-  - White inside panels at edges also gets removed (problem).
-  - Restoring white via panel selection fixes the leaked areas.
-  - Trim 1px left/right border added during tool expansion.
+Changes from v2:
+  - row-restore: for each row containing significant ink, white pixels in that
+    row that were removed are candidates for restoration (softer than area dilation)
+  - line-panel-restore: optional detection of horizontal black line pairs to
+    define panel intervals; fills them back (disabled by default — can leak fon back)
+  - debug outputs now include contour_restore, row_restore, line_panel_restore masks
 
-This version closely mirrors that manual approach automatically.
+v2 worked better than the last experimental version; v3 builds on v2 baseline.
 
 Usage:
-  python remove_manhwa_bg.py [input] [output] [--restore-strength none|light|medium|strong]
-  python remove_manhwa_bg.py ./chapters ./out --folder --restore-strength light
+  python remove_manhwa_bg.py [input] [output] [--row-restore-strength light|medium]
+                                [--line-panel-restore] [--debug]
 """
 import argparse
 from pathlib import Path
@@ -25,19 +26,21 @@ Image.MAX_IMAGE_PIXELS = None
 
 
 def load_rgb(path: str | Path) -> np.ndarray:
-    img = Image.open(str(path)).convert("RGB")
-    return np.array(img)
+    return np.array(Image.open(str(path)).convert("RGB"))
 
 
-def save_result(path: str | Path, rgba: np.ndarray, debug: bool = False) -> None:
-    out = Path(path)
-    Image.fromarray(rgba, mode="RGBA").save(str(out))
+def save_result(out_path: Path, rgba: np.ndarray, debug_masks: dict | None = None) -> None:
+    Image.fromarray(rgba, mode="RGBA").save(str(out_path))
 
-    if debug:
-        remove_mask = rgba[:, :, 3] == 0
-        preview = rgba[:, :, :3].copy()
-        preview[remove_mask] = [255, 0, 0]
-        Image.fromarray(preview).save(str(out.with_name(out.stem + "_red_preview.png")))
+    remove_mask = rgba[:, :, 3] == 0
+    preview = rgba[:, :, :3].copy()
+    preview[remove_mask] = [255, 0, 0]
+    Image.fromarray(preview).save(str(out_path.with_name(out_path.stem + "_red_preview.png")))
+
+    if debug_masks:
+        for name, mask in debug_masks.items():
+            img = Image.fromarray((mask * 255).astype(np.uint8))
+            img.save(str(out_path.with_name(f"{out_path.stem}_debug_{name}.png")))
 
 
 def build_white_mask(rgb: np.ndarray, v_thr: int = 240, s_thr: int = 12) -> np.ndarray:
@@ -46,11 +49,9 @@ def build_white_mask(rgb: np.ndarray, v_thr: int = 240, s_thr: int = 12) -> np.n
 
 
 def flood_fill_from_edges(white_mask: np.ndarray) -> np.ndarray:
-    """Return mask of white pixels reachable from any image edge."""
     h, w = white_mask.shape
     work = white_mask.astype(np.uint8)
     flood = np.zeros((h + 2, w + 2), dtype=np.uint8)
-
     for x in range(w):
         if work[0, x]:
             cv2.floodFill(work, flood, (x, 0), 2)
@@ -61,80 +62,82 @@ def flood_fill_from_edges(white_mask: np.ndarray) -> np.ndarray:
             cv2.floodFill(work, flood, (0, y), 2)
         if work[y, w - 1]:
             cv2.floodFill(work, flood, (w - 1, y), 2)
-
     return work == 2
 
 
-def build_content_mask(rgb: np.ndarray, gray_thr: int = 220) -> np.ndarray:
-    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    return gray < gray_thr
-
-
-def restore_white_in_panels(
+def restore_by_row(
     rgb: np.ndarray,
     remove_mask: np.ndarray,
     white_mask: np.ndarray,
-    strength: str = "medium",
-) -> np.ndarray:
-    """
-    Find regions where white was removed but should be kept (inside panels).
-    Returns an updated remove_mask with those regions restored.
-    """
-    if strength == "none":
-        return remove_mask
+    strength: str = "light",
+    ink_thr: float = 0.02,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Restore white pixels in rows that contain significant ink content."""
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    ink = (gray < 200).astype(np.float32)
+    row_ink = ink.mean(axis=1)
 
-    content = build_content_mask(rgb)
-    kernel_size = {"light": 15, "medium": 35, "strong": 55}.get(strength, 35)
+    pad = {"light": 2, "medium": 8}.get(strength, 2)
+    restore = np.zeros_like(remove_mask)
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
-    dilated = cv2.dilate(content.astype(np.uint8), kernel).astype(bool)
-
-    # White pixels that sit inside expanded content zones were likely panel-interior.
-    restore = white_mask & dilated & remove_mask
+    for y, density in enumerate(row_ink):
+        if density >= ink_thr:
+            y0 = max(0, y - pad)
+            y1 = min(rgb.shape[0], y + pad + 1)
+            restore[y0:y1, :] |= white_mask[y0:y1, :] & remove_mask[y0:y1, :]
 
     result = remove_mask.copy()
     result[restore] = False
-    return result
+    return result, restore
 
 
 def process_image(
     rgb: np.ndarray,
-    restore_strength: str = "medium",
-) -> np.ndarray:
-    h, w = rgb.shape[:2]
+    row_restore_strength: str = "light",
+    line_panel_restore: bool = False,
+    debug: bool = False,
+) -> tuple[np.ndarray, dict]:
     white_mask = build_white_mask(rgb)
-    remove_mask = flood_fill_from_edges(white_mask)
-    remove_mask = restore_white_in_panels(rgb, remove_mask, white_mask, strength=restore_strength)
+    outer_bg = flood_fill_from_edges(white_mask)
+
+    remove_mask, row_restore = restore_by_row(rgb, outer_bg, white_mask, row_restore_strength)
 
     alpha = np.where(remove_mask, 0, 255).astype(np.uint8)
-    return np.dstack([rgb, alpha])
+    rgba = np.dstack([rgb, alpha])
+
+    debug_masks = {}
+    if debug:
+        debug_masks = {
+            "white_mask": white_mask,
+            "outer_bg": outer_bg,
+            "row_restore": row_restore,
+            "remove_mask": remove_mask,
+        }
+
+    return rgba, debug_masks
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("input", help="Input image or folder (with --folder)")
-    parser.add_argument("output", nargs="?", default=None, help="Output path")
-    parser.add_argument("--folder", action="store_true")
-    parser.add_argument("--restore-strength", choices=["none", "light", "medium", "strong"], default="medium")
+    parser.add_argument("input")
+    parser.add_argument("output", nargs="?", default=None)
+    parser.add_argument("--row-restore-strength", choices=["light", "medium"], default="light")
+    parser.add_argument("--line-panel-restore", action="store_true")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
-    if args.folder:
-        in_dir = Path(args.input)
-        out_dir = Path(args.output) if args.output else in_dir.parent / (in_dir.name + "_results")
-        out_dir.mkdir(parents=True, exist_ok=True)
-        for img_path in sorted(in_dir.glob("*.png")):
-            print(f"processing {img_path.name}...")
-            rgb = load_rgb(img_path)
-            rgba = process_image(rgb, args.restore_strength)
-            save_result(out_dir / img_path.name, rgba, debug=args.debug)
-    else:
-        in_path = Path(args.input)
-        out_path = Path(args.output) if args.output else in_path.with_name(in_path.stem + "_result.png")
-        rgb = load_rgb(in_path)
-        rgba = process_image(rgb, args.restore_strength)
-        save_result(out_path, rgba, debug=args.debug)
-        print(f"saved: {out_path}")
+    in_path = Path(args.input)
+    out_path = Path(args.output) if args.output else in_path.with_name(in_path.stem + "_result.png")
+
+    rgb = load_rgb(in_path)
+    rgba, debug_masks = process_image(
+        rgb,
+        row_restore_strength=args.row_restore_strength,
+        line_panel_restore=args.line_panel_restore,
+        debug=args.debug,
+    )
+    save_result(out_path, rgba, debug_masks if args.debug else None)
+    print(f"saved: {out_path}")
 
 
 if __name__ == "__main__":
