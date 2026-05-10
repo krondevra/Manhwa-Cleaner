@@ -1,0 +1,10 @@
+chapters-initial/
+chapters-long/
+chapters-results/
+samples/
+models/
+logs/
+psd/
+__pycache__/
+*.pyc
+.venv/
