@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """
-v0.2.0 — rule-based prototype: flood fill + panel detection.
+v0.2.2 — magic-wand inspired: aggressive flood fill then selective restore.
 
-Strategy:
-  1. Build near-white mask (HSV: high V, low S).
-  2. Detect full-width horizontal panel borders (long dark runs touching both edges).
-  3. Classify borders as top/bottom by checking ink density above/below.
-  4. Mark everything between a top/bottom pair as protected panel area.
-  5. Flood-fill from image edges through white pixels that are NOT inside panels.
-  6. Set flood-filled pixels to alpha=0.
+Observations from manual workflow (2.png → 5.png):
+  - Magic Wand from edges removes most background correctly.
+  - White inside panels at edges also gets removed (problem).
+  - Restoring white via panel selection fixes the leaked areas.
+  - Trim 1px left/right border added during tool expansion.
+
+This version closely mirrors that manual approach automatically.
+
+Usage:
+  python remove_manhwa_bg.py [input] [output] [--restore-strength none|light|medium|strong]
+  python remove_manhwa_bg.py ./chapters ./out --folder --restore-strength light
 """
 import argparse
 from pathlib import Path
@@ -17,186 +21,120 @@ import cv2
 import numpy as np
 from PIL import Image
 
-
-def load_rgb(path: str) -> np.ndarray:
-    return np.array(Image.open(path).convert("RGB"))
+Image.MAX_IMAGE_PIXELS = None
 
 
-def save_rgba(path: str, rgba: np.ndarray) -> None:
-    Image.fromarray(rgba, mode="RGBA").save(path)
+def load_rgb(path: str | Path) -> np.ndarray:
+    img = Image.open(str(path)).convert("RGB")
+    return np.array(img)
 
 
-def longest_dark_runs(dark: np.ndarray) -> np.ndarray:
-    """Return the longest continuous dark run for every image row."""
-    h, _ = dark.shape
-    runs = np.zeros(h, dtype=np.int32)
+def save_result(path: str | Path, rgba: np.ndarray, debug: bool = False) -> None:
+    out = Path(path)
+    Image.fromarray(rgba, mode="RGBA").save(str(out))
 
-    for y in range(h):
-        row = dark[y]
-        padded = np.concatenate(([False], row, [False]))
-        changes = np.diff(padded.astype(np.int8))
-        starts = np.flatnonzero(changes == 1)
-        ends = np.flatnonzero(changes == -1)
-        if len(starts) > 0:
-            runs[y] = np.max(ends - starts)
-
-    return runs
+    if debug:
+        remove_mask = rgba[:, :, 3] == 0
+        preview = rgba[:, :, :3].copy()
+        preview[remove_mask] = [255, 0, 0]
+        Image.fromarray(preview).save(str(out.with_name(out.stem + "_red_preview.png")))
 
 
-def merge_close_rows(rows: np.ndarray, max_gap: int = 3) -> list[int]:
-    """Merge nearby horizontal line rows into single y coordinates."""
-    if len(rows) == 0:
-        return []
-
-    groups = []
-    start = prev = int(rows[0])
-
-    for r in rows[1:]:
-        r = int(r)
-        if r - prev <= max_gap:
-            prev = r
-        else:
-            groups.append((start, prev))
-            start = prev = r
-
-    groups.append((start, prev))
-    return [(a + b) // 2 for a, b in groups]
-
-
-def detect_panel_intervals(
-    rgb: np.ndarray,
-    white_v_thr: int = 240,
-    white_s_thr: int = 10,
-    black_thr: int = 45,
-    edge_margin: int = 5,
-    line_run_ratio: float = 0.15,
-    line_pixels_ratio: float = 0.15,
-    inspect_window: int = 30,
-    min_panel_height: int = 80,
-) -> list[tuple[int, int]]:
-    """
-    Detect full-width panel intervals using horizontal black borders.
-
-    A top border has more ink below; a bottom border has more ink above.
-    """
-    h, w = rgb.shape[:2]
-
-    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    dark = gray < black_thr
-
-    dark_counts = dark.sum(axis=1)
-    dark_runs = longest_dark_runs(dark)
-
-    touches_left = dark[:, :edge_margin].any(axis=1)
-    touches_right = dark[:, -edge_margin:].any(axis=1)
-
-    candidate_rows = np.where(
-        touches_left
-        & touches_right
-        & (dark_counts >= line_pixels_ratio * w)
-        & (dark_runs >= line_run_ratio * w)
-    )[0]
-
-    lines = merge_close_rows(candidate_rows)
-
+def build_white_mask(rgb: np.ndarray, v_thr: int = 240, s_thr: int = 12) -> np.ndarray:
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-    erasable_white = (hsv[:, :, 2] >= white_v_thr) & (hsv[:, :, 1] <= white_s_thr)
-    ink = ~erasable_white
-
-    typed_lines = []
-
-    for y in lines:
-        above_1 = max(0, y - inspect_window - 3)
-        above_2 = max(0, y - 3)
-        below_1 = min(h, y + 3)
-        below_2 = min(h, y + inspect_window + 3)
-
-        above_ink = ink[above_1:above_2, :].mean() if above_2 > above_1 else 0.0
-        below_ink = ink[below_1:below_2, :].mean() if below_2 > below_1 else 0.0
-
-        if below_ink > above_ink + 0.05:
-            typed_lines.append((y, "top"))
-        elif above_ink > below_ink + 0.05:
-            typed_lines.append((y, "bottom"))
-        else:
-            typed_lines.append((y, "unknown"))
-
-    intervals = []
-    open_top = None
-
-    for y, line_type in typed_lines:
-        if line_type == "top":
-            if open_top is None:
-                open_top = y
-        elif line_type == "bottom":
-            if open_top is not None and y - open_top >= min_panel_height:
-                intervals.append((open_top, y))
-                open_top = None
-
-    return intervals
+    return (hsv[:, :, 2] >= v_thr) & (hsv[:, :, 1] <= s_thr)
 
 
-def remove_white_background(
-    rgb: np.ndarray,
-    white_v_thr: int = 240,
-    white_s_thr: int = 10,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    h, w = rgb.shape[:2]
-
-    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-    erasable_white = (hsv[:, :, 2] >= white_v_thr) & (hsv[:, :, 1] <= white_s_thr)
-
-    panel_intervals = detect_panel_intervals(rgb, white_v_thr=white_v_thr, white_s_thr=white_s_thr)
-
-    panel_mask = np.zeros((h, w), dtype=bool)
-    for y1, y2 in panel_intervals:
-        panel_mask[y1:y2 + 1, :] = True
-
-    # White pixels inside panels are protected from flood fill.
-    traversable_background = erasable_white & ~panel_mask
-
-    work = traversable_background.astype(np.uint8)
-    flood_mask = np.zeros((h + 2, w + 2), dtype=np.uint8)
+def flood_fill_from_edges(white_mask: np.ndarray) -> np.ndarray:
+    """Return mask of white pixels reachable from any image edge."""
+    h, w = white_mask.shape
+    work = white_mask.astype(np.uint8)
+    flood = np.zeros((h + 2, w + 2), dtype=np.uint8)
 
     for x in range(w):
-        if work[0, x] == 1:
-            cv2.floodFill(work, flood_mask, (x, 0), 2)
-        if work[h - 1, x] == 1:
-            cv2.floodFill(work, flood_mask, (x, h - 1), 2)
-
+        if work[0, x]:
+            cv2.floodFill(work, flood, (x, 0), 2)
+        if work[h - 1, x]:
+            cv2.floodFill(work, flood, (x, h - 1), 2)
     for y in range(h):
-        if work[y, 0] == 1:
-            cv2.floodFill(work, flood_mask, (0, y), 2)
-        if work[y, w - 1] == 1:
-            cv2.floodFill(work, flood_mask, (w - 1, y), 2)
+        if work[y, 0]:
+            cv2.floodFill(work, flood, (0, y), 2)
+        if work[y, w - 1]:
+            cv2.floodFill(work, flood, (w - 1, y), 2)
 
-    remove_mask = work == 2
+    return work == 2
 
-    alpha = np.full((h, w), 255, dtype=np.uint8)
-    alpha[remove_mask] = 0
 
-    rgba = np.dstack([rgb, alpha])
+def build_content_mask(rgb: np.ndarray, gray_thr: int = 220) -> np.ndarray:
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    return gray < gray_thr
 
-    return rgba, remove_mask, panel_mask
+
+def restore_white_in_panels(
+    rgb: np.ndarray,
+    remove_mask: np.ndarray,
+    white_mask: np.ndarray,
+    strength: str = "medium",
+) -> np.ndarray:
+    """
+    Find regions where white was removed but should be kept (inside panels).
+    Returns an updated remove_mask with those regions restored.
+    """
+    if strength == "none":
+        return remove_mask
+
+    content = build_content_mask(rgb)
+    kernel_size = {"light": 15, "medium": 35, "strong": 55}.get(strength, 35)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
+    dilated = cv2.dilate(content.astype(np.uint8), kernel).astype(bool)
+
+    # White pixels that sit inside expanded content zones were likely panel-interior.
+    restore = white_mask & dilated & remove_mask
+
+    result = remove_mask.copy()
+    result[restore] = False
+    return result
+
+
+def process_image(
+    rgb: np.ndarray,
+    restore_strength: str = "medium",
+) -> np.ndarray:
+    h, w = rgb.shape[:2]
+    white_mask = build_white_mask(rgb)
+    remove_mask = flood_fill_from_edges(white_mask)
+    remove_mask = restore_white_in_panels(rgb, remove_mask, white_mask, strength=restore_strength)
+
+    alpha = np.where(remove_mask, 0, 255).astype(np.uint8)
+    return np.dstack([rgb, alpha])
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("input", help="Input manhwa image")
-    parser.add_argument("output", help="Output PNG with transparent background")
-    parser.add_argument("--white-v", type=int, default=240)
-    parser.add_argument("--white-s", type=int, default=10)
+    parser.add_argument("input", help="Input image or folder (with --folder)")
+    parser.add_argument("output", nargs="?", default=None, help="Output path")
+    parser.add_argument("--folder", action="store_true")
+    parser.add_argument("--restore-strength", choices=["none", "light", "medium", "strong"], default="medium")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
-    rgb = load_rgb(args.input)
-    rgba, remove_mask, panel_mask = remove_white_background(rgb, white_v_thr=args.white_v, white_s_thr=args.white_s)
-    save_rgba(args.output, rgba)
-
-    if args.debug:
-        out = Path(args.output)
-        Image.fromarray((remove_mask * 255).astype(np.uint8)).save(out.with_name(out.stem + "_remove_mask.png"))
-        Image.fromarray((panel_mask * 255).astype(np.uint8)).save(out.with_name(out.stem + "_panel_mask.png"))
+    if args.folder:
+        in_dir = Path(args.input)
+        out_dir = Path(args.output) if args.output else in_dir.parent / (in_dir.name + "_results")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for img_path in sorted(in_dir.glob("*.png")):
+            print(f"processing {img_path.name}...")
+            rgb = load_rgb(img_path)
+            rgba = process_image(rgb, args.restore_strength)
+            save_result(out_dir / img_path.name, rgba, debug=args.debug)
+    else:
+        in_path = Path(args.input)
+        out_path = Path(args.output) if args.output else in_path.with_name(in_path.stem + "_result.png")
+        rgb = load_rgb(in_path)
+        rgba = process_image(rgb, args.restore_strength)
+        save_result(out_path, rgba, debug=args.debug)
+        print(f"saved: {out_path}")
 
 
 if __name__ == "__main__":
