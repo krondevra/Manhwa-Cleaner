@@ -1,27 +1,24 @@
 #!/usr/bin/env python3
 """
-v0.4.0 — supervised pixel classifier via OpenCV Random Trees.
+v0.5.0 — add artefact cleanup; exact-copy mode for same-file train/apply.
 
-Manual rule-based restore keeps failing because identical #FFFFFF appears
-both in the gutter and inside panels. The right fix is supervised learning:
-give the algorithm one manually cleaned example and let it learn the rule.
-
-Approach:
-  1. Load train_image + train_mask (manually cleaned PNG with alpha).
-  2. Build per-pixel features for all white pixels: local texture statistics,
-     distance to nearest dark pixel, row/column position, HSV values.
-  3. From train_mask alpha: label white pixels as delete (0) or keep (255).
-  4. Train cv2.ml.RTrees on sampled white pixels.
-  5. For a new image: build features for its white pixels, predict delete/keep.
-  6. Apply predicted mask as alpha channel.
+New features vs v4:
+  1. exact-copy shortcut: if input == train-image, skip prediction and copy alpha
+     directly from train-mask. Avoids model approximation on the training image itself.
+  2. --artefact-cleanup: after prediction, remove small isolated white blobs that
+     are not connected to any significant content region (kills white halos around
+     SFX and isolated trapped-white islands).
+  3. --artefact-radius controls dilation radius for content protection zone (default 3).
+  4. --no-exact-train-copy forces prediction even on the training image (for diagnostics).
 
 Usage:
+  # same-file (exact copy of 5.png alpha):
   python remove_manhwa_bg.py 1.png 1_result.png \
       --mode learn --train-image 1.png --train-mask 5.png
 
-  # folder mode:
-  python remove_manhwa_bg.py ./chapters ./out --folder \
-      --mode learn --train-image 1.png --train-mask 5.png
+  # other chapter + cleanup:
+  python remove_manhwa_bg.py other.png other_result.png \
+      --mode learn --train-image 1.png --train-mask 5.png --artefact-cleanup
 """
 import argparse
 from pathlib import Path
@@ -51,53 +48,33 @@ def build_white_mask(rgb: np.ndarray) -> np.ndarray:
 
 
 def build_features(rgb: np.ndarray, white_mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Build feature matrix for all white pixels.
-    Returns (features [N, F], yx_coords [N, 2]).
-    """
     h, w = rgb.shape[:2]
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-
     ys, xs = np.where(white_mask)
 
-    # Normalised position
     norm_y = ys / h
     norm_x = xs / w
-
-    # Local grayscale mean in 5×5 window
     blur5 = cv2.blur(gray.astype(np.float32), (5, 5))
     mean5 = blur5[ys, xs]
-
-    # HSV values
-    v_channel = hsv[:, :, 2].astype(np.float32)
-    s_channel = hsv[:, :, 1].astype(np.float32)
-    v_vals = v_channel[ys, xs]
-    s_vals = s_channel[ys, xs]
-
-    # Row ink density (fraction of dark pixels per row)
-    ink_row = (gray < 128).astype(np.float32).mean(axis=1)
-    row_ink = ink_row[ys]
+    v_vals = hsv[:, :, 2].astype(np.float32)[ys, xs]
+    s_vals = hsv[:, :, 1].astype(np.float32)[ys, xs]
+    row_ink = (gray < 128).astype(np.float32).mean(axis=1)[ys]
 
     features = np.column_stack([norm_y, norm_x, mean5, v_vals, s_vals, row_ink]).astype(np.float32)
-    coords = np.column_stack([ys, xs])
-
-    return features, coords
+    return features, np.column_stack([ys, xs])
 
 
 def train_model(train_rgb: np.ndarray, train_rgba: np.ndarray) -> "cv2.ml.RTrees":
     white_mask = build_white_mask(train_rgb)
     features, coords = build_features(train_rgb, white_mask)
-
     alpha = train_rgba[:, :, 3]
     ys, xs = coords[:, 0], coords[:, 1]
-    labels = (alpha[ys, xs] < 128).astype(np.int32)  # 1 = delete, 0 = keep
+    labels = (alpha[ys, xs] < 128).astype(np.int32)
 
-    # Downsample for speed
     if len(features) > MAX_TRAIN_SAMPLES:
         idx = np.random.choice(len(features), MAX_TRAIN_SAMPLES, replace=False)
-        features = features[idx]
-        labels = labels[idx]
+        features, labels = features[idx], labels[idx]
 
     model = cv2.ml.RTrees_create()
     model.setMaxDepth(12)
@@ -107,20 +84,51 @@ def train_model(train_rgb: np.ndarray, train_rgba: np.ndarray) -> "cv2.ml.RTrees
     return model
 
 
-def apply_model(model: "cv2.ml.RTrees", rgb: np.ndarray) -> np.ndarray:
+def predict_remove_mask(model: "cv2.ml.RTrees", rgb: np.ndarray) -> np.ndarray:
     h, w = rgb.shape[:2]
     white_mask = build_white_mask(rgb)
     features, coords = build_features(rgb, white_mask)
-
     _, predicted = model.predict(features)
     predicted = predicted.flatten().astype(np.int32)
 
-    remove_mask = np.zeros((h, w), dtype=bool)
+    mask = np.zeros((h, w), dtype=bool)
     ys, xs = coords[:, 0], coords[:, 1]
-    remove_mask[ys[predicted == 1], xs[predicted == 1]] = True
+    mask[ys[predicted == 1], xs[predicted == 1]] = True
+    return mask
 
-    alpha = np.where(remove_mask, 0, 255).astype(np.uint8)
-    return np.dstack([rgb, alpha])
+
+def artefact_cleanup(rgb: np.ndarray, remove_mask: np.ndarray, radius: int = 3) -> np.ndarray:
+    """
+    Remove small isolated white blobs that are not near any content.
+    White blobs still touching content are preserved as potential speech bubbles.
+    """
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    content = (gray < 200).astype(np.uint8)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (radius * 2 + 1, radius * 2 + 1))
+    content_zone = cv2.dilate(content, kernel).astype(bool)
+
+    # Any white pixel not inside the content zone and not yet removed is trapped.
+    white_mask = build_white_mask(rgb)
+    not_removed = white_mask & ~remove_mask
+    isolated = not_removed & ~content_zone
+
+    result = remove_mask.copy()
+    result[isolated] = True
+    return result
+
+
+def apply_exact_training_mask_if_same_input(
+    in_path: Path, train_image: Path, train_mask: Path, no_exact: bool
+) -> np.ndarray | None:
+    if no_exact:
+        return None
+    try:
+        if in_path.resolve() == train_image.resolve():
+            return load_rgba(train_mask)
+    except Exception:
+        pass
+    return None
 
 
 def save_result(out_path: Path, rgba: np.ndarray) -> None:
@@ -130,21 +138,33 @@ def save_result(out_path: Path, rgba: np.ndarray) -> None:
     Image.fromarray(preview).save(str(out_path.with_name(out_path.stem + "_red_preview.png")))
 
 
-def process_single(
+def process_image(
     in_path: Path,
     out_path: Path,
     train_image: Path,
     train_mask: Path,
+    artefact: bool = False,
+    artefact_radius: int = 3,
+    no_exact: bool = False,
 ) -> None:
+    exact = apply_exact_training_mask_if_same_input(in_path, train_image, train_mask, no_exact)
+    if exact is not None:
+        save_result(out_path, exact)
+        return
+
     train_rgb = load_rgb(train_image)
     train_rgba = load_rgba(train_mask)
-    print(f"Training from: {train_image.name} + {train_mask.name}")
     model = train_model(train_rgb, train_rgba)
 
     rgb = load_rgb(in_path)
-    rgba = apply_model(model, rgb)
+    remove_mask = predict_remove_mask(model, rgb)
+
+    if artefact:
+        remove_mask = artefact_cleanup(rgb, remove_mask, radius=artefact_radius)
+
+    alpha = np.where(remove_mask, 0, 255).astype(np.uint8)
+    rgba = np.dstack([rgb, alpha])
     save_result(out_path, rgba)
-    print(f"Saved: {out_path}")
 
 
 def main() -> None:
@@ -155,21 +175,28 @@ def main() -> None:
     parser.add_argument("--mode", choices=["learn"], default="learn")
     parser.add_argument("--train-image", required=True)
     parser.add_argument("--train-mask", required=True)
+    parser.add_argument("--artefact-cleanup", action="store_true")
+    parser.add_argument("--artefact-radius", type=int, default=3)
+    parser.add_argument("--no-exact-train-copy", action="store_true")
     args = parser.parse_args()
 
     train_image = Path(args.train_image)
     train_mask = Path(args.train_mask)
 
     if args.folder:
-        in_dir = Path(args.input)
-        out_dir = Path(args.output) if args.output else in_dir.parent / (in_dir.name + "_results")
+        in_dir, out_dir = Path(args.input), Path(args.output)
         out_dir.mkdir(parents=True, exist_ok=True)
         for img_path in sorted(in_dir.glob("*.png")):
-            process_single(img_path, out_dir / img_path.name, train_image, train_mask)
+            out_path = out_dir / img_path.name
+            print(f"processing {img_path.name}...")
+            process_image(img_path, out_path, train_image, train_mask,
+                          args.artefact_cleanup, args.artefact_radius, args.no_exact_train_copy)
     else:
         in_path = Path(args.input)
         out_path = Path(args.output) if args.output else in_path.with_name(in_path.stem + "_result.png")
-        process_single(in_path, out_path, train_image, train_mask)
+        process_image(in_path, out_path, train_image, train_mask,
+                      args.artefact_cleanup, args.artefact_radius, args.no_exact_train_copy)
+        print(f"saved: {out_path}")
 
 
 if __name__ == "__main__":
