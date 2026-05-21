@@ -1,44 +1,48 @@
 #!/usr/bin/env python3
 """
-v1.0.0 — full ML pivot: PyTorch SmallUNet binary segmentation.
+v1.1.0 — guidance channels: threshold + morphology + Canny edges.
 
-Why the rewrite:
-  Random Trees (v4–v7) failed to generalise from 1 training example to other
-  chapters. The classifier can only learn per-pixel statistics; it has no spatial
-  understanding of panel structure, speech bubbles, or SFX context.
+The first version (v1.0.0) used only 3 RGB channels. The model was not
+learning to separate background from panel-interior white because both
+look visually identical in RGB.
 
-  A convolutional U-Net, trained on manually cleaned chapters, can learn to
-  understand these spatial relationships: it sees a 512×512 context window and
-  can correlate a white pixel with the frame boundary above it, the speech bubble
-  around it, etc.
+Manual cleaning workflow observation (Photoshop steps the user described):
+  1. Duplicate layer
+  2. Threshold at ~90
+  3. Merge threshold + duplicate
+  4. Filter → Other → Minimum, Radius 2 px
+  5. Filter → Other → Maximum, Radius 2 px
+  6. Magic Wand select background
+  ...
 
-Architecture: SmallUNet
-  Input:  3 channels (RGB)
-  Enc1:   3 → 32 (conv 3×3, BN, ReLU ×2) → MaxPool
-  Enc2:   32 → 64                          → MaxPool
-  Enc3:   64 → 128                         → MaxPool
-  Bottleneck: 128 → 256                    (no pool)
-  Dec3:   256+128 → 128 (skip connection from Enc3)
-  Dec2:   128+ 64 →  64 (skip from Enc2)
-  Dec1:    64+ 32 →  32 (skip from Enc1)
-  Out:     32 → 1  (sigmoid → alpha probability)
+These preprocessing steps form a "guidance signal" that already separates
+background from content. Adding them as extra input channels gives the model
+a head start: instead of rediscovering thresholding from RGB, it receives
+explicit structural cues alongside the original image.
 
-Loss: DiceBCELoss = 0.5 * BCE + 0.5 * Dice
-Optimizer: AdamW (lr=1e-3)
-Training: random 512×512 patches from long-strip samples.
+Input: 7 channels
+  [0:3]  RGB
+  [3]    grayscale threshold at 90 (binary, float 0/1)
+  [4]    morphological close of threshold (fills small gaps in frames)
+  [5]    morphological open  of threshold (removes small noise)
+  [6]    Canny edge map (normalised 0–1)
 
-Commands:
-  python manhwa_ml_cleaner.py train \
-      --samples samples --model models/manhwa_cleaner.pt \
-      --epochs 20 --steps-per-epoch 500 --batch-size 2 --patch-size 512 --device cpu
+This version also learns from the full alpha mask (not just white pixels),
+so it can learn to remove black outlines around Korean SFX glyphs too.
 
-  python manhwa_ml_cleaner.py process \
-      chapters/003.png chapters-results/003_result.png \
-      --model models/manhwa_cleaner.pt --device cpu
+Usage:
+  python manhwa_ml_cleaner_v2.py train \
+      --samples samples \
+      --model models/manhwa_ml_cleaner_v2.pt \
+      --epochs 5 --steps-per-epoch 250 --batch-size 2 --patch-size 512 --device cpu
 
-  python manhwa_ml_cleaner.py process-folder \
-      --input chapters --output chapters-results \
-      --model models/manhwa_cleaner.pt --device cpu
+  python manhwa_ml_cleaner_v2.py process \
+      chapters/004.png chapters-results/004_result.png \
+      --model models/manhwa_ml_cleaner_v2.pt --device cpu
+
+  # resume training:
+  python manhwa_ml_cleaner_v2.py train ... \
+      --resume models/manhwa_ml_cleaner_v2.pt
 """
 from __future__ import annotations
 
@@ -67,10 +71,49 @@ except ImportError:
     HAS_TORCH = False
 
 CLEAN_SUFFIX = "_cleaned"
+IN_CHANNELS = 7
 
 
 def _log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Guidance channel preprocessing
+# ──────────────────────────────────────────────────────────────────────────────
+
+def build_guidance_channels(rgb: np.ndarray) -> np.ndarray:
+    """
+    Returns a (H, W, 4) float32 array of guidance channels:
+      [0] threshold at 90
+      [1] morphological close of threshold
+      [2] morphological open  of threshold
+      [3] Canny edges (normalised)
+    """
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+
+    # Threshold (mirroring Photoshop: Threshold layer at ~90)
+    _, thr = cv2.threshold(gray, 90, 255, cv2.THRESH_BINARY_INV)
+    thr_f = thr.astype(np.float32) / 255.0
+
+    # Morphological close (Photoshop "Maximum" → closes gaps)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    closed = cv2.morphologyEx(thr, cv2.MORPH_CLOSE, kernel).astype(np.float32) / 255.0
+
+    # Morphological open (Photoshop "Minimum" → removes noise)
+    opened = cv2.morphologyEx(thr, cv2.MORPH_OPEN, kernel).astype(np.float32) / 255.0
+
+    # Canny edges
+    edges = cv2.Canny(gray, 50, 150).astype(np.float32) / 255.0
+
+    return np.stack([thr_f, closed, opened, edges], axis=2)
+
+
+def rgb_to_input(rgb: np.ndarray) -> np.ndarray:
+    """Concatenate RGB + 4 guidance channels → (H, W, 7) float32."""
+    rgb_f = rgb.astype(np.float32) / 255.0
+    guidance = build_guidance_channels(rgb)
+    return np.concatenate([rgb_f, guidance], axis=2)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -90,7 +133,7 @@ class _Block(nn.Module):
 
 
 class SmallUNet(nn.Module):
-    def __init__(self, in_channels: int = 3) -> None:
+    def __init__(self, in_channels: int = IN_CHANNELS) -> None:
         super().__init__()
         self.enc1 = _Block(in_channels, 32)
         self.enc2 = _Block(32, 64)
@@ -114,10 +157,6 @@ class SmallUNet(nn.Module):
         return self.out(d1)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Loss
-# ──────────────────────────────────────────────────────────────────────────────
-
 class DiceBCELoss(nn.Module):
     def __init__(self, pos_weight: float = 1.0) -> None:
         super().__init__()
@@ -127,20 +166,18 @@ class DiceBCELoss(nn.Module):
         bce = self.bce(logits, targets)
         probs = torch.sigmoid(logits)
         smooth = 1.0
-        num = 2 * (probs * targets).sum() + smooth
-        den = probs.sum() + targets.sum() + smooth
-        dice = 1 - num / den
+        dice = 1 - (2 * (probs * targets).sum() + smooth) / (probs.sum() + targets.sum() + smooth)
         return 0.5 * bce + 0.5 * dice
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Data loading
+# Data
 # ──────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class Sample:
-    original: np.ndarray   # H×W×3 uint8
-    target: np.ndarray     # H×W float32 in [0,1]  (1 = delete)
+    input_arr: np.ndarray   # H×W×7 float32
+    target: np.ndarray      # H×W float32
 
 
 def load_samples(samples_dir: Path, alpha_threshold: int = 128) -> List[Sample]:
@@ -151,39 +188,36 @@ def load_samples(samples_dir: Path, alpha_threshold: int = 128) -> List[Sample]:
         if not clean_path.exists():
             continue
         _log(f"loading sample: {orig_path.name} + {clean_path.name}")
-        original = np.array(Image.open(orig_path).convert("RGB"))
+        rgb = np.array(Image.open(orig_path).convert("RGB"))
         cleaned = np.array(Image.open(clean_path).convert("RGBA"))
-        if original.shape[:2] != cleaned.shape[:2]:
+        if rgb.shape[:2] != cleaned.shape[:2]:
             raise ValueError(f"Size mismatch: {orig_path.name} and {clean_path.name}")
+        inp = rgb_to_input(rgb)
         target = (cleaned[:, :, 3] < alpha_threshold).astype(np.float32)
         delete_ratio = target.mean()
-        _log(f"  size={original.shape[1]}x{original.shape[0]}, delete_ratio={delete_ratio:.4f}")
-        results.append(Sample(original=original, target=target))
+        _log(f"  size={rgb.shape[1]}x{rgb.shape[0]}, delete_ratio={delete_ratio:.4f}")
+        results.append(Sample(input_arr=inp, target=target))
     return results
 
 
-def random_patch(
-    sample: Sample,
-    patch_size: int,
-) -> Tuple[np.ndarray, np.ndarray]:
-    h, w = sample.original.shape[:2]
+def random_patch(sample: Sample, patch_size: int) -> Tuple[np.ndarray, np.ndarray]:
+    h, w = sample.input_arr.shape[:2]
     y = random.randint(0, max(0, h - patch_size))
     x = random.randint(0, max(0, w - patch_size))
     ph, pw = min(patch_size, h - y), min(patch_size, w - x)
-    img_patch = sample.original[y:y+ph, x:x+pw]
-    tgt_patch = sample.target[y:y+ph, x:x+pw]
-    # Pad to patch_size if at boundary
+    img_p = sample.input_arr[y:y+ph, x:x+pw]
+    tgt_p = sample.target[y:y+ph, x:x+pw]
     if ph < patch_size or pw < patch_size:
-        img_out = np.zeros((patch_size, patch_size, 3), dtype=np.uint8)
+        img_out = np.zeros((patch_size, patch_size, IN_CHANNELS), dtype=np.float32)
         tgt_out = np.zeros((patch_size, patch_size), dtype=np.float32)
-        img_out[:ph, :pw] = img_patch
-        tgt_out[:ph, :pw] = tgt_patch
+        img_out[:ph, :pw] = img_p
+        tgt_out[:ph, :pw] = tgt_p
         return img_out, tgt_out
-    return img_patch, tgt_patch
+    return img_p, tgt_p
 
 
-def to_tensor(img: np.ndarray, device: "torch.device") -> "torch.Tensor":
-    t = torch.from_numpy(img.astype(np.float32) / 255.0)
+def to_tensor(arr: np.ndarray, device: "torch.device") -> "torch.Tensor":
+    t = torch.from_numpy(arr)
     if t.ndim == 3:
         t = t.permute(2, 0, 1)
     return t.unsqueeze(0).to(device)
@@ -200,11 +234,10 @@ def save_model(model: SmallUNet, path: Path, config: dict) -> None:
 
 def load_model(path: Path, device: "torch.device") -> Tuple[SmallUNet, dict]:
     checkpoint = torch.load(str(path), map_location=device, weights_only=False)
-    config = checkpoint.get("config", {"in_channels": 3})
-    model = SmallUNet(in_channels=config.get("in_channels", 3))
+    config = checkpoint.get("config", {"in_channels": IN_CHANNELS})
+    model = SmallUNet(in_channels=config.get("in_channels", IN_CHANNELS))
     model.load_state_dict(checkpoint["model"])
-    model.to(device).eval()
-    return model, config
+    return model.to(device).eval(), config
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -227,8 +260,8 @@ def train_command(args: argparse.Namespace) -> None:
     _log(f"training pixels: delete={int(total_delete):,}, total={total_pixels:,}, delete_ratio={delete_ratio:.4f}")
     _log(f"pos_weight={pos_weight:.3f}")
 
-    config = {"in_channels": 3}
-    model = SmallUNet(in_channels=3).to(device)
+    config = {"in_channels": IN_CHANNELS}
+    model = SmallUNet(in_channels=IN_CHANNELS).to(device)
 
     if args.resume:
         _log(f"loading checkpoint for resume: {args.resume}")
@@ -236,7 +269,7 @@ def train_command(args: argparse.Namespace) -> None:
         model.load_state_dict(ckpt["model"])
 
     criterion = DiceBCELoss(pos_weight=pos_weight).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=getattr(args, "lr", 1e-3))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     scaler = GradScaler() if (args.amp and device.type == "cuda") else None
 
     best_loss = math.inf
@@ -256,8 +289,8 @@ def train_command(args: argparse.Namespace) -> None:
                 imgs.append(to_tensor(img_p, device))
                 tgts.append(torch.from_numpy(tgt_p).unsqueeze(0).unsqueeze(0).to(device))
 
-            imgs_t = torch.cat(imgs, dim=0)
-            tgts_t = torch.cat(tgts, dim=0)
+            imgs_t = torch.cat(imgs)
+            tgts_t = torch.cat(tgts)
 
             optimizer.zero_grad()
             if scaler:
@@ -272,15 +305,12 @@ def train_command(args: argparse.Namespace) -> None:
                 optimizer.step()
 
             epoch_loss += loss.item()
-
             if step % 25 == 0:
-                elapsed = time.time() - t_epoch
                 _log(f"epoch {epoch}/{args.epochs}, step {step}/{args.steps_per_epoch}, "
-                     f"loss={epoch_loss/step:.5f}, elapsed={elapsed:.1f}s")
+                     f"loss={epoch_loss/step:.5f}, elapsed={time.time()-t_epoch:.1f}s")
 
         epoch_loss /= args.steps_per_epoch
-        elapsed = time.time() - t_epoch
-        _log(f"epoch {epoch}/{args.epochs} done, loss={epoch_loss:.5f}, time={elapsed:.1f}s")
+        _log(f"epoch {epoch}/{args.epochs} done, loss={epoch_loss:.5f}, time={time.time()-t_epoch:.1f}s")
 
         if epoch_loss < best_loss:
             best_loss = epoch_loss
@@ -298,17 +328,18 @@ def infer_tiled(
     model: SmallUNet,
     rgb: np.ndarray,
     device: "torch.device",
-    tile_size: int = 512,
-    overlap: int = 64,
+    tile_size: int = 768,
+    overlap: int = 96,
     threshold: float = 0.5,
     amp: bool = False,
 ) -> np.ndarray:
     h, w = rgb.shape[:2]
-    # Pad to multiple of tile_size
     pad_h = math.ceil(h / tile_size) * tile_size
     pad_w = math.ceil(w / tile_size) * tile_size
-    padded = np.zeros((pad_h, pad_w, 3), dtype=np.uint8)
-    padded[:h, :w] = rgb
+
+    inp = rgb_to_input(rgb)
+    padded = np.zeros((pad_h, pad_w, IN_CHANNELS), dtype=np.float32)
+    padded[:h, :w] = inp
 
     prob_map = np.zeros((pad_h, pad_w), dtype=np.float32)
     count_map = np.zeros((pad_h, pad_w), dtype=np.float32)
@@ -323,14 +354,12 @@ def infer_tiled(
 
     tiles = [(y, x) for y in ys for x in xs]
     total = len(tiles)
-    _log(f"inference: image={w}x{h}, padded={pad_w}x{pad_h}, tiles={total}, "
-         f"tile_size={tile_size}, overlap={overlap}")
+    _log(f"inference: image={w}x{h}, padded={pad_w}x{pad_h}, tiles={total}, tile_size={tile_size}, overlap={overlap}")
     t0 = time.time()
 
     for i, (ty, tx) in enumerate(tiles):
         patch = padded[ty:ty+tile_size, tx:tx+tile_size]
         t = to_tensor(patch, device)
-
         with torch.no_grad():
             if amp and device.type == "cuda":
                 with autocast():
@@ -363,7 +392,6 @@ def process_command(args: argparse.Namespace) -> None:
 
     alpha = np.where(remove_mask, 0, 255).astype(np.uint8)
     rgba = np.dstack([rgb, alpha])
-
     out_path = Path(args.output)
     _log(f"saved: {out_path}")
     Image.fromarray(rgba, mode="RGBA").save(str(out_path))
@@ -378,14 +406,12 @@ def process_folder_command(args: argparse.Namespace) -> None:
     model, _ = load_model(Path(args.model), device)
     in_dir, out_dir = Path(args.input), Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
-
     for img_path in sorted(in_dir.glob("*.png")):
-        out_path = out_dir / img_path.name
         _log(f"processing {img_path.name}...")
         rgb = np.array(Image.open(img_path).convert("RGB"))
         remove_mask = infer_tiled(model, rgb, device, threshold=args.threshold, amp=args.amp)
         alpha = np.where(remove_mask, 0, 255).astype(np.uint8)
-        Image.fromarray(np.dstack([rgb, alpha]), mode="RGBA").save(str(out_path))
+        Image.fromarray(np.dstack([rgb, alpha]), mode="RGBA").save(str(out_dir / img_path.name))
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -394,12 +420,11 @@ def process_folder_command(args: argparse.Namespace) -> None:
 
 def main() -> None:
     if not HAS_TORCH:
-        raise SystemExit("PyTorch not installed. Run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu")
+        raise SystemExit("PyTorch not installed.")
 
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd")
 
-    # train
     train = sub.add_parser("train")
     train.add_argument("--samples", default="samples")
     train.add_argument("--model", required=True)
@@ -414,21 +439,20 @@ def main() -> None:
     train.add_argument("--alpha-threshold", type=int, default=128, dest="alpha_threshold")
     train.set_defaults(func=train_command)
 
-    # process
     proc = sub.add_parser("process")
     proc.add_argument("input")
     proc.add_argument("output")
-    proc.add_argument("--model", default="models/manhwa_cleaner.pt")
+    proc.add_argument("--model", default="models/manhwa_ml_cleaner_v2.pt")
     proc.add_argument("--device", default="cpu")
     proc.add_argument("--threshold", type=float, default=0.5)
     proc.add_argument("--amp", action="store_true")
+    proc.add_argument("--postprocess", action="store_true")
     proc.set_defaults(func=process_command)
 
-    # process-folder
     pf = sub.add_parser("process-folder")
     pf.add_argument("--input", required=True)
     pf.add_argument("--output", required=True)
-    pf.add_argument("--model", default="models/manhwa_cleaner.pt")
+    pf.add_argument("--model", default="models/manhwa_ml_cleaner_v2.pt")
     pf.add_argument("--device", default="cpu")
     pf.add_argument("--threshold", type=float, default=0.5)
     pf.add_argument("--amp", action="store_true")
