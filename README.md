@@ -67,3 +67,29 @@ python cleaner.py process-folder \
   --input chapters-long --output chapters-results \
   --model models/cleaner.pt --device cpu
 ```
+
+### Tooling
+
+**Join per-page exports into a single long-strip:**
+```bash
+python longify.py chapters-initial/ch005/ chapters-long/005.png
+```
+
+**Split a too-large chapter for processing in halves:**
+```bash
+bash split.sh chapters-long/003.png 003_top.png 003_bottom.png
+# ... process each half ...
+bash merge.sh 003_top_result.png 003_bottom_result.png chapters-results/003.png
+```
+
+## Active Learning Workflow
+
+1. Manually clean chapters 001–N in Photoshop; export pairs to `samples/`
+2. Train initial model
+3. Run `process-folder` on remaining chapters; visually inspect output
+4. For chapters where model fails, manually clean and add to `samples/`
+5. Resume training: `--resume models/r_cleaner.pt --model models/r_cleaner_vN.pt`
+6. Repeat until acceptable quality across all chapters
+
+Model was trained on 4 chapters (5 sample pairs) before it demonstrated
+generalisation to unseen chapters (~2 min inference vs. 2–9h manual).
