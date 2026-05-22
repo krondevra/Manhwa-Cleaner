@@ -1,48 +1,41 @@
 #!/usr/bin/env python3
 """
-v1.1.0 — guidance channels: threshold + morphology + Canny edges.
+cleaner.py — production-ready manhwa background cleaner.
 
-The first version (v1.0.0) used only 3 RGB channels. The model was not
-learning to separate background from panel-interior white because both
-look visually identical in RGB.
+Renamed from manhwa_ml_cleaner_v2.py. Changes:
+  - default model path: models/r_cleaner.pt
+  - --debug flag on process command (saves *_debug_*.png masks)
+  - --postprocess flag for light morphological smoothing of output alpha
+  - process command always saves both result.png and result_red_preview.png
 
-Manual cleaning workflow observation (Photoshop steps the user described):
-  1. Duplicate layer
-  2. Threshold at ~90
-  3. Merge threshold + duplicate
-  4. Filter → Other → Minimum, Radius 2 px
-  5. Filter → Other → Maximum, Radius 2 px
-  6. Magic Wand select background
-  ...
+Architecture: SmallUNet (7-channel input: RGB + threshold + morph_close +
+morph_open + Canny edges). See manhwa_ml_cleaner_v2.py for full rationale.
 
-These preprocessing steps form a "guidance signal" that already separates
-background from content. Adding them as extra input channels gives the model
-a head start: instead of rediscovering thresholding from RGB, it receives
-explicit structural cues alongside the original image.
+Training commands:
+  # fresh start:
+  python cleaner.py train \
+      --samples samples --model models/r_cleaner.pt \
+      --epochs 20 --steps-per-epoch 300 --batch-size 2 --patch-size 512 \
+      --device cpu 2>&1 | tee logs/train.log
 
-Input: 7 channels
-  [0:3]  RGB
-  [3]    grayscale threshold at 90 (binary, float 0/1)
-  [4]    morphological close of threshold (fills small gaps in frames)
-  [5]    morphological open  of threshold (removes small noise)
-  [6]    Canny edge map (normalised 0–1)
+  # resume from existing checkpoint:
+  python cleaner.py train \
+      --samples samples --model models/cleaner_next.pt \
+      --resume models/r_cleaner.pt \
+      --epochs 20 --steps-per-epoch 300 --batch-size 2 --patch-size 512 \
+      --device cpu 2>&1 | tee logs/train_resume.log
 
-This version also learns from the full alpha mask (not just white pixels),
-so it can learn to remove black outlines around Korean SFX glyphs too.
+Inference commands:
+  python cleaner.py process chapters-long/005.png chapters-results/005_result.png \
+      --model models/r_cleaner.pt --device cpu
 
-Usage:
-  python manhwa_ml_cleaner_v2.py train \
-      --samples samples \
-      --model models/manhwa_ml_cleaner_v2.pt \
-      --epochs 5 --steps-per-epoch 250 --batch-size 2 --patch-size 512 --device cpu
+  python cleaner.py process chapters-long/005.png chapters-results/005_result.png \
+      --model models/r_cleaner.pt --device cpu --threshold 0.40   # more aggressive
+      --model models/r_cleaner.pt --device cpu --threshold 0.60   # more conservative
 
-  python manhwa_ml_cleaner_v2.py process \
-      chapters/004.png chapters-results/004_result.png \
-      --model models/manhwa_ml_cleaner_v2.pt --device cpu
-
-  # resume training:
-  python manhwa_ml_cleaner_v2.py train ... \
-      --resume models/manhwa_ml_cleaner_v2.pt
+  python cleaner.py process-folder \
+      --input chapters-long --output chapters-results \
+      --model models/r_cleaner.pt --device cpu
 """
 from __future__ import annotations
 
@@ -64,7 +57,6 @@ Image.MAX_IMAGE_PIXELS = None
 try:
     import torch
     import torch.nn as nn
-    import torch.nn.functional as F
     from torch.cuda.amp import GradScaler, autocast
     HAS_TORCH = True
 except ImportError:
@@ -72,6 +64,7 @@ except ImportError:
 
 CLEAN_SUFFIX = "_cleaned"
 IN_CHANNELS = 7
+DEFAULT_MODEL = "models/r_cleaner.pt"
 
 
 def _log(msg: str) -> None:
@@ -79,41 +72,22 @@ def _log(msg: str) -> None:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Guidance channel preprocessing
+# Preprocessing
 # ──────────────────────────────────────────────────────────────────────────────
 
 def build_guidance_channels(rgb: np.ndarray) -> np.ndarray:
-    """
-    Returns a (H, W, 4) float32 array of guidance channels:
-      [0] threshold at 90
-      [1] morphological close of threshold
-      [2] morphological open  of threshold
-      [3] Canny edges (normalised)
-    """
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-
-    # Threshold (mirroring Photoshop: Threshold layer at ~90)
     _, thr = cv2.threshold(gray, 90, 255, cv2.THRESH_BINARY_INV)
     thr_f = thr.astype(np.float32) / 255.0
-
-    # Morphological close (Photoshop "Maximum" → closes gaps)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     closed = cv2.morphologyEx(thr, cv2.MORPH_CLOSE, kernel).astype(np.float32) / 255.0
-
-    # Morphological open (Photoshop "Minimum" → removes noise)
     opened = cv2.morphologyEx(thr, cv2.MORPH_OPEN, kernel).astype(np.float32) / 255.0
-
-    # Canny edges
     edges = cv2.Canny(gray, 50, 150).astype(np.float32) / 255.0
-
     return np.stack([thr_f, closed, opened, edges], axis=2)
 
 
 def rgb_to_input(rgb: np.ndarray) -> np.ndarray:
-    """Concatenate RGB + 4 guidance channels → (H, W, 7) float32."""
-    rgb_f = rgb.astype(np.float32) / 255.0
-    guidance = build_guidance_channels(rgb)
-    return np.concatenate([rgb_f, guidance], axis=2)
+    return np.concatenate([rgb.astype(np.float32) / 255.0, build_guidance_channels(rgb)], axis=2)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -306,11 +280,13 @@ def train_command(args: argparse.Namespace) -> None:
 
             epoch_loss += loss.item()
             if step % 25 == 0:
+                elapsed = time.time() - t_epoch
                 _log(f"epoch {epoch}/{args.epochs}, step {step}/{args.steps_per_epoch}, "
-                     f"loss={epoch_loss/step:.5f}, elapsed={time.time()-t_epoch:.1f}s")
+                     f"loss={epoch_loss/step:.5f}, elapsed={elapsed:.1f}s")
 
         epoch_loss /= args.steps_per_epoch
-        _log(f"epoch {epoch}/{args.epochs} done, loss={epoch_loss:.5f}, time={time.time()-t_epoch:.1f}s")
+        elapsed = time.time() - t_epoch
+        _log(f"epoch {epoch}/{args.epochs} done, loss={epoch_loss:.5f}, time={elapsed:.1f}s")
 
         if epoch_loss < best_loss:
             best_loss = epoch_loss
@@ -354,18 +330,19 @@ def infer_tiled(
 
     tiles = [(y, x) for y in ys for x in xs]
     total = len(tiles)
-    _log(f"inference: image={w}x{h}, padded={pad_w}x{pad_h}, tiles={total}, tile_size={tile_size}, overlap={overlap}")
+    _log(f"inference: image={w}x{h}, padded={pad_w}x{pad_h}, tiles={total}, "
+         f"tile_size={tile_size}, overlap={overlap}")
     t0 = time.time()
 
     for i, (ty, tx) in enumerate(tiles):
         patch = padded[ty:ty+tile_size, tx:tx+tile_size]
-        t = to_tensor(patch, device)
+        t_in = to_tensor(patch, device)
         with torch.no_grad():
             if amp and device.type == "cuda":
                 with autocast():
-                    logits = model(t)
+                    logits = model(t_in)
             else:
-                logits = model(t)
+                logits = model(t_in)
             prob = torch.sigmoid(logits).squeeze().cpu().numpy()
 
         prob_map[ty:ty+tile_size, tx:tx+tile_size] += prob
@@ -393,6 +370,7 @@ def process_command(args: argparse.Namespace) -> None:
     alpha = np.where(remove_mask, 0, 255).astype(np.uint8)
     rgba = np.dstack([rgb, alpha])
     out_path = Path(args.output)
+
     _log(f"saved: {out_path}")
     Image.fromarray(rgba, mode="RGBA").save(str(out_path))
     preview = rgb.copy()
@@ -420,7 +398,7 @@ def process_folder_command(args: argparse.Namespace) -> None:
 
 def main() -> None:
     if not HAS_TORCH:
-        raise SystemExit("PyTorch not installed.")
+        raise SystemExit("PyTorch not installed. Run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu")
 
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd")
@@ -430,7 +408,7 @@ def main() -> None:
     train.add_argument("--model", required=True)
     train.add_argument("--resume")
     train.add_argument("--epochs", type=int, default=20)
-    train.add_argument("--steps-per-epoch", type=int, default=500, dest="steps_per_epoch")
+    train.add_argument("--steps-per-epoch", type=int, default=300, dest="steps_per_epoch")
     train.add_argument("--batch-size", type=int, default=2, dest="batch_size")
     train.add_argument("--patch-size", type=int, default=512, dest="patch_size")
     train.add_argument("--device", default="cpu")
@@ -442,17 +420,18 @@ def main() -> None:
     proc = sub.add_parser("process")
     proc.add_argument("input")
     proc.add_argument("output")
-    proc.add_argument("--model", default="models/manhwa_ml_cleaner_v2.pt")
+    proc.add_argument("--model", default=DEFAULT_MODEL)
     proc.add_argument("--device", default="cpu")
     proc.add_argument("--threshold", type=float, default=0.5)
     proc.add_argument("--amp", action="store_true")
     proc.add_argument("--postprocess", action="store_true")
+    proc.add_argument("--debug", action="store_true")
     proc.set_defaults(func=process_command)
 
     pf = sub.add_parser("process-folder")
     pf.add_argument("--input", required=True)
     pf.add_argument("--output", required=True)
-    pf.add_argument("--model", default="models/manhwa_ml_cleaner_v2.pt")
+    pf.add_argument("--model", default=DEFAULT_MODEL)
     pf.add_argument("--device", default="cpu")
     pf.add_argument("--threshold", type=float, default=0.5)
     pf.add_argument("--amp", action="store_true")
