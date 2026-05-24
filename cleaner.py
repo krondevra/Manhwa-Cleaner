@@ -246,8 +246,13 @@ def train_command(args: argparse.Namespace) -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     scaler = GradScaler() if (args.amp and device.type == "cuda") else None
 
+    n_samples = len(samples)
+    versioned_name = Path(args.model).stem + f"_{n_samples}chapters"
+    versioned_path = Path(args.model).with_name(versioned_name + ".pt")
+
     best_loss = math.inf
-    _log("training started")
+    _log(f"training started — {n_samples} sample pair(s)")
+    _log(f"versioned checkpoint will save to: {versioned_path}")
     t_total = time.time()
 
     for epoch in range(1, args.epochs + 1):
@@ -291,7 +296,8 @@ def train_command(args: argparse.Namespace) -> None:
         if epoch_loss < best_loss:
             best_loss = epoch_loss
             save_model(model, Path(args.model), config)
-            _log(f"saved best model: {args.model}")
+            save_model(model, versioned_path, config)
+            _log(f"saved best model: {args.model} + {versioned_path}")
 
     _log(f"training complete in {time.time()-t_total:.1f}s, best_loss={best_loss:.5f}")
 
