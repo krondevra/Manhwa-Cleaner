@@ -1,28 +1,36 @@
-#!/usr/bin/env bash
-# split.sh — split a very long PNG into equal halves vertically.
-#
-# Usage:
-#   bash split.sh input.png output_top.png output_bottom.png
-#
-# Requires: ImageMagick (convert, identify).
-# Used when a chapter is too large for some downstream tools and must be
-# processed in two halves, then re-merged with merge.sh.
-
-set -euo pipefail
-
-if [[ $# -ne 3 ]]; then
-  echo "Usage: $0 input.png top_output.png bottom_output.png"
-  exit 1
-fi
+#!/bin/bash
 
 INPUT="$1"
-TOP_OUT="$2"
-BOTTOM_OUT="$3"
+CHUNK=50000
 
-HEIGHT=$(identify -format "%h" "$INPUT")
-HALF=$(( HEIGHT / 2 ))
+if [ ! -f "$INPUT" ]; then
+    echo "File not found: $INPUT"
+    exit 1
+fi
 
-convert "$INPUT" -crop "x${HALF}+0+0" +repage "$TOP_OUT"
-convert "$INPUT" -crop "x${HALF}+0+${HALF}" +repage "$BOTTOM_OUT"
+NAME="${INPUT%.*}"
+EXT="${INPUT##*.}"
 
-echo "Split at row $HALF: $TOP_OUT + $BOTTOM_OUT"
+HEIGHT=$(ffprobe -v error \
+-select_streams v:0 \
+-show_entries stream=height \
+-of csv=p=0 \
+"$INPUT")
+
+OFFSET=0
+INDEX=1
+
+while (( OFFSET < HEIGHT )); do
+    CURRENT=$(( HEIGHT - OFFSET ))
+
+    if (( CURRENT > CHUNK )); then
+        CURRENT=$CHUNK
+    fi
+
+    ffmpeg -y -i "$INPUT" \
+    -vf "crop=iw:${CURRENT}:0:${OFFSET}" \
+    "${NAME}-${INDEX}.${EXT}"
+
+    OFFSET=$(( OFFSET + CURRENT ))
+    INDEX=$(( INDEX + 1 ))
+done

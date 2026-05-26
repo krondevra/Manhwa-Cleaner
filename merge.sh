@@ -1,23 +1,34 @@
-#!/usr/bin/env bash
-# merge.sh — merge two PNG images vertically.
-#
-# Usage:
-#   bash merge.sh top.png bottom.png output.png
-#
-# Requires: ImageMagick (convert).
-# Used when a chapter is exported as two separate halves and must be joined
-# before the ML cleaner processes it.
+#!/bin/bash
 
-set -euo pipefail
+PREFIX="$1"
 
-if [[ $# -ne 3 ]]; then
-  echo "Usage: $0 top.png bottom.png output.png"
-  exit 1
+if [ -z "$PREFIX" ]; then
+    echo "Usage: ./merge.sh <prefix>"
+    exit 1
 fi
 
-TOP="$1"
-BOTTOM="$2"
-OUTPUT="$3"
+OUTPUT="${PREFIX}_cleaned.png"
 
-convert "$TOP" "$BOTTOM" -append "$OUTPUT"
-echo "Merged: $OUTPUT"
+FILES=($(ls ${PREFIX}-*_cleaned.png 2>/dev/null | sort -V))
+
+if [ ${#FILES[@]} -eq 0 ]; then
+    echo "No files found"
+    exit 1
+fi
+
+CMD="ffmpeg -y"
+
+FILTER=""
+
+for i in "${!FILES[@]}"; do
+    CMD="$CMD -i \"${FILES[$i]}\""
+    FILTER="${FILTER}[${i}:v]"
+done
+
+FILTER="${FILTER}vstack=inputs=${#FILES[@]}[out]"
+
+CMD="$CMD -filter_complex \"$FILTER\" -map \"[out]\" \"$OUTPUT\""
+
+eval $CMD
+
+echo "Saved: $OUTPUT"
