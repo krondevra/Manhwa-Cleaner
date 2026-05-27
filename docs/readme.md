@@ -26,6 +26,7 @@ CH=033 && python tools/merge.py "$CH" \
 ```
 
 ---
+
 ## cut_samples.py
 ```bash
 CH=033 && python tools/cut_samples.py "$CH" \
@@ -37,4 +38,35 @@ CH=033 && python tools/cut_samples.py "$CH" \
   --post-merge-max-height 1600 \
   --min-standalone-height 600 \
   --clear
+```
+
+---
+
+## mask_preview_tool.py
+```bash
+CH=033 && python tools/mask_preview_tool.py "$CH"
+```
+
+---
+
+## mask_boundary_roi.py
+```bash
+CH=033 && python tools/mask_boundary_roi.py "$CH"
+```
+
+---
+
+## mask_parameter_search.py
+```bash
+CH=033 && python tools/mask_parameter_search.py "$CH" \
+  --profile black-hard \
+  --top-tonal 60
+```
+
+Profiles: 
+```bash
+--profile black-soft 
+--profile black-hard
+--profile white-soft
+--profile white-hard
 ```
