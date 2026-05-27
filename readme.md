@@ -53,8 +53,8 @@ python cleaner.py process \
 ```bash
 cd ~/Desktop && source /home/user/Desktop/.venv/bin/activate && cd ~/Desktop/Manhwa-cleaner
 
-FROM=009
-TO=038
+FROM=003
+TO=175
 MODEL=models/2.0.pt
 
 mkdir -p chapters-results logs
