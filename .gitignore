@@ -11,7 +11,7 @@ __pycache__/
 /materials
 /output
 compare/
-Photopea-scripts/
 problem_candidates/
 Threshold/
 .old-samples/
+temp/
