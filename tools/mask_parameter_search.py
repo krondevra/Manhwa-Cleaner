@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import math
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import cv2
@@ -1228,13 +1229,27 @@ def save_contact_sheet(out_dir: Path, rgb: np.ndarray, rois: list[ROI], results:
         # Do not kill the already finished search.
         print(f"WARNING: detailed contact sheets failed: {e}")
 
-def save_all(image_path: Path, rgb, rois, stage1, final, profile, out_dir: Path) -> None:
+def save_all(
+    image_path: Path,
+    rgb,
+    rois,
+    stage1,
+    final,
+    profile,
+    out_dir: Path,
+    save_contact_sheets: bool = True,
+) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     save_rois(out_dir / "used_rois.txt", rois)
     save_stage1_csv(out_dir, stage1)
     save_final_csv(out_dir, final)
     save_best_settings(out_dir, final[0], profile)
-    save_contact_sheet(out_dir, rgb, rois, final)
+
+    if save_contact_sheets:
+        save_contact_sheet(out_dir, rgb, rois, final)
+    else:
+        print("Contact sheets skipped.")
+
     b = final[0]
     print("\nBest final settings:")
     print(f"  profile: {profile.profile_name}")
@@ -1250,6 +1265,448 @@ def save_all(image_path: Path, rgb, rois, stage1, final, profile, out_dir: Path)
     print(f"  black_error: {b.black_error:.8f}")
     print(f"  white_error: {b.white_error:.8f}")
     print(f"\nSaved to: {out_dir}")
+
+
+def run_single_profile_search(
+    image_path: Path,
+    stem: str,
+    rgb: np.ndarray,
+    rois: list[ROI],
+    profile_name: str,
+    wide: bool,
+    morph_order: str,
+    top_tonal: int,
+    output_dir: Path | None,
+    save_contact_sheets: bool,
+) -> tuple[SearchProfile, list[TonalParams], list[FinalParams], Path]:
+    profile = get_search_profile(profile_name, wide, morph_order)
+
+    if output_dir is None:
+        out_dir = default_output_dir_for_search(stem, profile.profile_name)
+    else:
+        out_dir = output_dir
+
+    print(f"\n{'=' * 72}")
+    print(f"Running profile: {profile.profile_name}")
+    print(f"{'=' * 72}")
+    print(f"Output dir: {out_dir}")
+    print(f"Profile: {profile.profile_name}")
+    print(f"Background: {profile.background}")
+    print(f"Mask kind: {profile.mask_kind}")
+    print(f"Weights: BLACK={profile.black_weight}, WHITE={profile.white_weight}")
+    print(f"Morph order search: {profile.morph_orders}")
+
+    stage1 = search_stage1_tonal(rgb, rois, profile)
+    final = search_stage2_morphology(rgb, rois, profile, stage1, top_tonal)
+    save_all(
+        image_path=image_path,
+        rgb=rgb,
+        rois=rois,
+        stage1=stage1,
+        final=final,
+        profile=profile,
+        out_dir=out_dir,
+        save_contact_sheets=save_contact_sheets,
+    )
+
+    return profile, stage1, final, out_dir
+
+
+def _mask_to_delete(mask: np.ndarray) -> np.ndarray:
+    return mask < 128
+
+
+def _delete_to_mask(delete: np.ndarray) -> np.ndarray:
+    out = np.full(delete.shape, 255, dtype=np.uint8)
+    out[delete] = 0
+    return out
+
+
+def build_mask_from_final_params(rgb: np.ndarray, params: FinalParams) -> np.ndarray:
+    return build_final_mask(
+        rgb,
+        params.channel,
+        params.black,
+        params.white,
+        params.gamma_x100,
+        params.threshold,
+        params.min_radius,
+        params.max_radius,
+        params.morph_order,
+    )
+
+
+def evaluate_mask_builder_on_rois(
+    rgb: np.ndarray,
+    rois: list[ROI],
+    black_weight: float,
+    white_weight: float,
+    builder,
+) -> dict[str, float]:
+    black_errors: list[float] = []
+    white_errors: list[float] = []
+
+    for roi in rois:
+        crop, local = crop_for_roi(rgb, roi, pad=ROI_PAD)
+        lx0, ly0, lx1, ly1 = local
+
+        mask = builder(crop)
+        err = score_mask_patch(mask[ly0:ly1, lx0:lx1], roi.label)
+
+        if roi.label == BLACK_LABEL:
+            black_errors.append(err)
+        else:
+            white_errors.append(err)
+
+    black_error = float(np.mean(black_errors)) if black_errors else 0.0
+    white_error = float(np.mean(white_errors)) if white_errors else 0.0
+    score = black_error * black_weight + white_error * white_weight
+
+    return {
+        "score": score,
+        "black_error": black_error,
+        "white_error": white_error,
+    }
+
+
+def evaluate_risk_zone_on_rois(
+    rgb: np.ndarray,
+    rois: list[ROI],
+    hard: FinalParams,
+    soft: FinalParams,
+) -> dict[str, float]:
+    black_ratios: list[float] = []
+    white_ratios: list[float] = []
+
+    for roi in rois:
+        crop, local = crop_for_roi(rgb, roi, pad=ROI_PAD)
+        lx0, ly0, lx1, ly1 = local
+
+        hard_delete = _mask_to_delete(build_mask_from_final_params(crop, hard))
+        soft_delete = _mask_to_delete(build_mask_from_final_params(crop, soft))
+
+        risk = hard_delete & ~soft_delete
+        risk_roi = risk[ly0:ly1, lx0:lx1]
+
+        ratio = float(risk_roi.mean()) if risk_roi.size else 0.0
+
+        if roi.label == BLACK_LABEL:
+            black_ratios.append(ratio)
+        else:
+            white_ratios.append(ratio)
+
+    return {
+        "risk_in_black_roi": float(np.mean(black_ratios)) if black_ratios else 0.0,
+        "risk_in_white_roi": float(np.mean(white_ratios)) if white_ratios else 0.0,
+    }
+
+
+def pair_weights_for_background(background: str) -> tuple[float, float]:
+    if background == "black":
+        # Dark content is easy to damage on black-background chapters.
+        # Therefore WHITE/keep gets higher weight in composed evaluation.
+        return 3.0, 6.0
+
+    # White-background chapters can tolerate a bit more aggressive removal,
+    # but WHITE/keep still matters.
+    return 3.0, 4.0
+
+
+def final_params_to_dict(params: FinalParams) -> dict:
+    data = asdict(params)
+    data["gamma"] = params.gamma_x100 / 100.0
+    return data
+
+
+def select_recommended_strategy(
+    composed_rows: list[dict],
+    tie_epsilon: float = 0.005,
+) -> tuple[dict, list[dict]]:
+    """
+    Select the best composed strategy by the lowest score.
+
+    tie_epsilon is relative. Example: 0.005 means that strategies within
+    0.5% of the best score are treated as close alternatives.
+    """
+    if not composed_rows:
+        raise ValueError("No composed strategy rows to choose from.")
+
+    ranked = sorted(composed_rows, key=lambda row: float(row["score"]))
+    best = ranked[0]
+    best_score = max(float(best["score"]), 1e-12)
+
+    alternatives = [
+        row
+        for row in ranked[1:]
+        if (float(row["score"]) - best_score) / best_score <= tie_epsilon
+    ]
+
+    return best, alternatives
+
+
+def save_pair_summary(
+    pair_dir: Path,
+    stem: str,
+    background: str,
+    hard_profile: SearchProfile,
+    soft_profile: SearchProfile,
+    hard_best: FinalParams,
+    soft_best: FinalParams,
+    composed_rows: list[dict],
+    risk_row: dict,
+) -> None:
+    pair_dir.mkdir(parents=True, exist_ok=True)
+
+    recommended_row, alternative_rows = select_recommended_strategy(composed_rows)
+    recommended_strategy = recommended_row["strategy"]
+    alternative_strategies = [row["strategy"] for row in alternative_rows]
+
+    csv_path = pair_dir / "pair_summary.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        wr = csv.writer(f)
+        wr.writerow([
+            "strategy",
+            "recommended",
+            "close_alternative",
+            "score",
+            "black_error",
+            "white_error",
+            "note",
+        ])
+
+        for row in composed_rows:
+            strategy = row["strategy"]
+            wr.writerow([
+                strategy,
+                "yes" if strategy == recommended_strategy else "no",
+                "yes" if strategy in alternative_strategies else "no",
+                f"{row['score']:.8f}",
+                f"{row['black_error']:.8f}",
+                f"{row['white_error']:.8f}",
+                row["note"],
+            ])
+
+        wr.writerow([
+            "risk_hard_only",
+            "no",
+            "no",
+            "",
+            f"{risk_row['risk_in_black_roi']:.8f}",
+            f"{risk_row['risk_in_white_roi']:.8f}",
+            "black_error column = risk ratio inside BLACK/remove ROIs; white_error column = risk ratio inside WHITE/keep ROIs",
+        ])
+
+    settings = {
+        "chapter": stem,
+        "background": background,
+        "recommended_final_strategy": recommended_strategy,
+        "alternative_strategies": alternative_strategies,
+        "recommendation_rule": "lowest composed score wins; close alternatives are within 0.5% of best score",
+        "meaning": {
+            "hard_delete": "aggressive delete candidate",
+            "soft_delete": "conservative delete candidate",
+            "intersection_safe_delete": "delete only where hard and soft agree",
+            "union_aggressive_delete": "delete where either hard or soft wants deletion",
+            "risk_hard_only": "hard wants delete, soft wants keep; review manually",
+        },
+        "weights_for_composed_scores": {
+            "black_weight": pair_weights_for_background(background)[0],
+            "white_weight": pair_weights_for_background(background)[1],
+        },
+        "hard_profile": hard_profile.profile_name,
+        "soft_profile": soft_profile.profile_name,
+        "hard_best": final_params_to_dict(hard_best),
+        "soft_best": final_params_to_dict(soft_best),
+        "composed_results": composed_rows,
+        "risk_zone": risk_row,
+    }
+
+    (pair_dir / "pair_settings.json").write_text(
+        json.dumps(settings, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    txt_path = pair_dir / "pair_settings.txt"
+    with txt_path.open("w", encoding="utf-8") as f:
+        f.write(f"chapter: {stem}\n")
+        f.write(f"background: {background}\n")
+        f.write(f"recommended_final_strategy: {recommended_strategy}\n")
+
+        if alternative_strategies:
+            f.write(f"alternative_strategies: {', '.join(alternative_strategies)}\n")
+
+        f.write("recommendation_rule: lowest composed score wins; close alternatives are within 0.5% of best score\n")
+        f.write("\n")
+
+        f.write("HARD SETTINGS\n")
+        f.write(f"profile: {hard_profile.profile_name}\n")
+        f.write(f"channel: {hard_best.channel}\n")
+        f.write(f"levels_black: {hard_best.black}\n")
+        f.write(f"levels_white: {hard_best.white}\n")
+        f.write(f"gamma: {hard_best.gamma_x100 / 100.0:.2f}\n")
+        f.write(f"threshold: {hard_best.threshold}\n")
+        f.write(f"minimum_radius: {hard_best.min_radius}\n")
+        f.write(f"maximum_radius: {hard_best.max_radius}\n")
+        f.write(f"morph_order: {hard_best.morph_order}\n")
+        f.write(f"score: {hard_best.score:.8f}\n")
+        f.write(f"black_error: {hard_best.black_error:.8f}\n")
+        f.write(f"white_error: {hard_best.white_error:.8f}\n")
+        f.write("\n")
+
+        f.write("SOFT SETTINGS\n")
+        f.write(f"profile: {soft_profile.profile_name}\n")
+        f.write(f"channel: {soft_best.channel}\n")
+        f.write(f"levels_black: {soft_best.black}\n")
+        f.write(f"levels_white: {soft_best.white}\n")
+        f.write(f"gamma: {soft_best.gamma_x100 / 100.0:.2f}\n")
+        f.write(f"threshold: {soft_best.threshold}\n")
+        f.write(f"minimum_radius: {soft_best.min_radius}\n")
+        f.write(f"maximum_radius: {soft_best.max_radius}\n")
+        f.write(f"morph_order: {soft_best.morph_order}\n")
+        f.write(f"score: {soft_best.score:.8f}\n")
+        f.write(f"black_error: {soft_best.black_error:.8f}\n")
+        f.write(f"white_error: {soft_best.white_error:.8f}\n")
+        f.write("\n")
+
+        f.write("COMPOSED STRATEGIES\n")
+        for row in composed_rows:
+            marker = " [RECOMMENDED]" if row["strategy"] == recommended_strategy else ""
+            if row["strategy"] in alternative_strategies:
+                marker += " [CLOSE ALTERNATIVE]"
+
+            f.write(
+                f"{row['strategy']}{marker}: score={row['score']:.8f}, "
+                f"black_error={row['black_error']:.8f}, "
+                f"white_error={row['white_error']:.8f} | {row['note']}\n"
+            )
+
+        f.write("\n")
+        f.write("RISK ZONE\n")
+        f.write("risk_hard_only = hard_delete AND NOT soft_delete\n")
+        f.write(f"risk_in_black_roi: {risk_row['risk_in_black_roi']:.8f}\n")
+        f.write(f"risk_in_white_roi: {risk_row['risk_in_white_roi']:.8f}\n")
+
+    print(f"\nRecommended strategy: {recommended_strategy}")
+
+    if alternative_strategies:
+        print(f"Close alternative(s): {', '.join(alternative_strategies)}")
+
+    print(f"Saved pair summary: {pair_dir}")
+    print(f"  {csv_path}")
+    print(f"  {txt_path}")
+    print(f"  {pair_dir / 'pair_settings.json'}")
+
+
+def evaluate_hard_soft_pair(
+    rgb: np.ndarray,
+    rois: list[ROI],
+    stem: str,
+    background: str,
+    hard_profile: SearchProfile,
+    soft_profile: SearchProfile,
+    hard_best: FinalParams,
+    soft_best: FinalParams,
+    pair_dir: Path,
+) -> None:
+    black_weight, white_weight = pair_weights_for_background(background)
+
+    def hard_builder(crop):
+        return build_mask_from_final_params(crop, hard_best)
+
+    def soft_builder(crop):
+        return build_mask_from_final_params(crop, soft_best)
+
+    def intersection_builder(crop):
+        hard_delete = _mask_to_delete(build_mask_from_final_params(crop, hard_best))
+        soft_delete = _mask_to_delete(build_mask_from_final_params(crop, soft_best))
+        return _delete_to_mask(hard_delete & soft_delete)
+
+    def union_builder(crop):
+        hard_delete = _mask_to_delete(build_mask_from_final_params(crop, hard_best))
+        soft_delete = _mask_to_delete(build_mask_from_final_params(crop, soft_best))
+        return _delete_to_mask(hard_delete | soft_delete)
+
+    hard_metrics = evaluate_mask_builder_on_rois(
+        rgb,
+        rois,
+        black_weight,
+        white_weight,
+        hard_builder,
+    )
+    hard_metrics["strategy"] = "hard_only"
+    hard_metrics["note"] = "aggressive mask only"
+
+    soft_metrics = evaluate_mask_builder_on_rois(
+        rgb,
+        rois,
+        black_weight,
+        white_weight,
+        soft_builder,
+    )
+    soft_metrics["strategy"] = "soft_only"
+    soft_metrics["note"] = "conservative mask only"
+
+    intersection_metrics = evaluate_mask_builder_on_rois(
+        rgb,
+        rois,
+        black_weight,
+        white_weight,
+        intersection_builder,
+    )
+    intersection_metrics["strategy"] = "intersection_safe_delete"
+    intersection_metrics["note"] = "delete only where hard and soft agree"
+
+    union_metrics = evaluate_mask_builder_on_rois(
+        rgb,
+        rois,
+        black_weight,
+        white_weight,
+        union_builder,
+    )
+    union_metrics["strategy"] = "union_aggressive_delete"
+    union_metrics["note"] = "delete where either hard or soft wants deletion"
+
+    composed_rows = [
+        hard_metrics,
+        soft_metrics,
+        intersection_metrics,
+        union_metrics,
+    ]
+
+    risk_row = evaluate_risk_zone_on_rois(
+        rgb=rgb,
+        rois=rois,
+        hard=hard_best,
+        soft=soft_best,
+    )
+
+    save_pair_summary(
+        pair_dir=pair_dir,
+        stem=stem,
+        background=background,
+        hard_profile=hard_profile,
+        soft_profile=soft_profile,
+        hard_best=hard_best,
+        soft_best=soft_best,
+        composed_rows=composed_rows,
+        risk_row=risk_row,
+    )
+
+    print("\nPair evaluation:")
+    for row in composed_rows:
+        print(
+            f"  {row['strategy']}: "
+            f"score={row['score']:.6f}, "
+            f"black_error={row['black_error']:.4f}, "
+            f"white_error={row['white_error']:.4f}"
+        )
+
+    print(
+        "  risk_hard_only: "
+        f"black_roi={risk_row['risk_in_black_roi']:.4f}, "
+        f"white_roi={risk_row['risk_in_white_roi']:.4f}"
+    )
+
 
 
 def main() -> None:
@@ -1277,12 +1734,24 @@ def main() -> None:
         default=None,
         help="Where to save manually marked ROIs. Default: data/temp/<CH>/used_rois_<CH>_manual.txt",
     )
-    parser.add_argument(
+
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument(
         "--profile",
         choices=["black-hard", "black-soft", "white-hard", "white-soft", "hard", "soft", "black-bg"],
-        default="white-hard",
-        help="Explicit profile. Recommended: black-hard, black-soft, white-hard, white-soft",
+        default=None,
+        help="Single explicit profile. Recommended: black-hard, black-soft, white-hard, white-soft",
     )
+    selection.add_argument(
+        "--background",
+        choices=["black", "white"],
+        default=None,
+        help=(
+            "Run a hard+soft pair for one background only. "
+            "Example: --background black runs black-hard and black-soft."
+        ),
+    )
+
     parser.add_argument(
         "--morph-order",
         choices=["auto", "minmax", "maxmin", "both"],
@@ -1294,13 +1763,19 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Output directory. Default: reports/best-values/<CH>/<CH>_<profile>_params",
+        help=(
+            "Output directory. For single profile: exact output dir. "
+            "For --background pair: pair summary dir; individual profile dirs stay in reports/best-values/<CH>/."
+        ),
+    )
+    parser.add_argument(
+        "--no-contact-sheets",
+        action="store_true",
+        help="Skip contact sheet generation. Useful for faster pair searches.",
     )
     args = parser.parse_args()
 
     image_path, stem, temp_dir = resolve_image_path(args.image)
-    profile = get_search_profile(args.profile, args.wide, args.morph_order)
-    output_dir = Path(args.output_dir) if args.output_dir else default_output_dir_for_search(stem, profile.profile_name)
 
     if args.mark_rois:
         roi_path = Path(args.roi_output) if args.roi_output else default_roi_output_path(stem, temp_dir)
@@ -1320,21 +1795,80 @@ def main() -> None:
     print(f"Image: {image_path}")
     print(f"Temp dir: {temp_dir}")
     print(f"ROI file: {roi_path}")
-    print(f"Output dir: {output_dir}")
     print(f"Size: {rgb.shape[1]}x{rgb.shape[0]}")
     print(f"ROIs: {len(rois)}")
     print(f"BLACK/remove: {sum(1 for r in rois if r.label == BLACK_LABEL)}")
     print(f"WHITE/keep:   {sum(1 for r in rois if r.label == WHITE_LABEL)}")
-    print(f"Profile: {profile.profile_name}")
-    print(f"Background: {profile.background}")
-    print(f"Mask kind: {profile.mask_kind}")
-    print(f"Weights: BLACK={profile.black_weight}, WHITE={profile.white_weight}")
-    print(f"Morph order search: {profile.morph_orders}")
     print(f"Mode: {'WIDE' if args.wide else 'FAST'}")
+    print(f"Contact sheets: {'OFF' if args.no_contact_sheets else 'ON'}")
 
-    stage1 = search_stage1_tonal(rgb, rois, profile)
-    final = search_stage2_morphology(rgb, rois, profile, stage1, args.top_tonal)
-    save_all(image_path, rgb, rois, stage1, final, profile, output_dir)
+    save_contact_sheets = not args.no_contact_sheets
+
+    if args.background:
+        background = args.background
+        hard_profile_name = f"{background}-hard"
+        soft_profile_name = f"{background}-soft"
+
+        pair_dir = (
+            Path(args.output_dir)
+            if args.output_dir
+            else Path("reports") / "best-values" / stem / f"{stem}_{background}_pair"
+        )
+
+        hard_profile, _hard_stage1, hard_final, _hard_dir = run_single_profile_search(
+            image_path=image_path,
+            stem=stem,
+            rgb=rgb,
+            rois=rois,
+            profile_name=hard_profile_name,
+            wide=args.wide,
+            morph_order=args.morph_order,
+            top_tonal=args.top_tonal,
+            output_dir=None,
+            save_contact_sheets=save_contact_sheets,
+        )
+
+        soft_profile, _soft_stage1, soft_final, _soft_dir = run_single_profile_search(
+            image_path=image_path,
+            stem=stem,
+            rgb=rgb,
+            rois=rois,
+            profile_name=soft_profile_name,
+            wide=args.wide,
+            morph_order=args.morph_order,
+            top_tonal=args.top_tonal,
+            output_dir=None,
+            save_contact_sheets=save_contact_sheets,
+        )
+
+        evaluate_hard_soft_pair(
+            rgb=rgb,
+            rois=rois,
+            stem=stem,
+            background=background,
+            hard_profile=hard_profile,
+            soft_profile=soft_profile,
+            hard_best=hard_final[0],
+            soft_best=soft_final[0],
+            pair_dir=pair_dir,
+        )
+        return
+
+    profile_name = args.profile or "white-hard"
+    output_dir = Path(args.output_dir) if args.output_dir else None
+
+    run_single_profile_search(
+        image_path=image_path,
+        stem=stem,
+        rgb=rgb,
+        rois=rois,
+        profile_name=profile_name,
+        wide=args.wide,
+        morph_order=args.morph_order,
+        top_tonal=args.top_tonal,
+        output_dir=output_dir,
+        save_contact_sheets=save_contact_sheets,
+    )
 
 
 if __name__ == "__main__":

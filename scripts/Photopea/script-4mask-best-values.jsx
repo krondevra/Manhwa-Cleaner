@@ -13,7 +13,6 @@
 // Notes:
 // - white masks use Minimum -> Maximum
 // - black masks use Maximum -> Minimum
-// - values are placeholders; replace them with ROI auto-search results
 
 var doc = app.activeDocument;
 
@@ -21,7 +20,7 @@ var doc = app.activeDocument;
 // SETTINGS
 //////////////////////////////////////////////////
 
-var softBlackSettings = { /// BEST
+var softBlackSettings = {
     name: "soft-black",
 
     // Levels: black / gamma / white
@@ -38,7 +37,7 @@ var softBlackSettings = { /// BEST
     morphOrder: "maxmin"
 };
 
-var hardBlackSettings = { /// BEST
+var hardBlackSettings = {
     name: "hard-black",
 
     levelsBlack: 0,
@@ -54,34 +53,34 @@ var hardBlackSettings = { /// BEST
     morphOrder: "maxmin"
 };
 
-var softWhiteSettings = { /// PLACEHOLDER
+var softWhiteSettings = {
     name: "soft-white",
 
     levelsBlack: 10,
-    levelsGamma: 0.60,
+    levelsGamma: 1.50,
     levelsWhite: 110,
 
-    threshold: 64,
+    threshold: 48,
 
     // white background logic: Minimum -> Maximum
-    minimumRadius: 10,
+    minimumRadius: 4,
     maximumRadius: 10,
 
     morphOrder: "minmax"
 };
 
-var hardWhiteSettings = { /// PLACEHOLDER
+var hardWhiteSettings = {
     name: "hard-white",
 
-    levelsBlack: 26,
-    levelsGamma: 0.40,
-    levelsWhite: 110,
+    levelsBlack: 18,
+    levelsGamma: 0.80,
+    levelsWhite: 70,
 
-    threshold: 32,
+    threshold: 20,
 
     // white background logic: Minimum -> Maximum
-    minimumRadius: 14,
-    maximumRadius: 14,
+    minimumRadius: 22,
+    maximumRadius: 10,
 
     morphOrder: "minmax"
 };

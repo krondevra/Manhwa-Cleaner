@@ -58,9 +58,10 @@ CH=033 && python tools/mask_boundary_roi.py "$CH"
 
 ## mask_parameter_search.py
 ```bash
-CH=033 && python tools/mask_parameter_search.py "$CH" \
-  --profile black-hard \
-  --top-tonal 60
+python tools/mask_parameter_search.py 033 \
+  --background black \
+  --top-tonal 60 \
+  --no-contact-sheets
 ```
 
 Profiles: 
@@ -114,6 +115,14 @@ python tools/ml_cleaner.py train \
 ```bash
 CH=003 && python tools/ml_cleaner.py process "$CH" \
   --model models/2.0.pt \
+  --red-preview
+```
+
+### list
+```bash
+python tools/ml_cleaner.py process-list \
+  --chapters 162,119,123,118,122,96,120,121,117,124 \
+  --model models/2.1.pt \
   --red-preview
 ```
 
