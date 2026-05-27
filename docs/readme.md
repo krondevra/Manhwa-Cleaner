@@ -70,3 +70,71 @@ Profiles:
 --profile white-soft
 --profile white-hard
 ```
+
+---
+
+## evaluate.py
+### Range
+```bash
+python tools/evaluate.py \
+  --from-chapter 003 \
+  --to-chapter 005
+```
+
+### List
+```bash
+python tools/evaluate.py \
+  --chapters 002,034,024 \
+```
+
+Optional:
+```bash
+  --allow-missing
+```
+
+---
+
+## ml_cleaner.py
+### Train model from 0
+```bash
+python tools/ml_cleaner.py train \
+  --samples data/samples \
+  --model models/2.1.pt
+```
+
+### Continue training from model
+```bash
+python tools/ml_cleaner.py train \
+  --samples data/samples \
+  --resume models/2.0.pt \
+  --model models/2.1.pt
+```
+
+### Clean chapter (single)
+```bash
+CH=003 && python tools/ml_cleaner.py process "$CH" \
+  --model models/2.0.pt \
+  --red-preview
+```
+
+### Clean chapters (range)
+```bash
+python tools/ml_cleaner.py process-range \
+  --from-chapter 003 \
+  --to-chapter 004 \
+  --model models/2.0.pt \
+  --red-preview
+```
+
+---
+
+## compare.py
+```bash
+python tools/compare.py 009 \
+  --results \
+    data/compare/009_cleaner4_red_preview.png \
+    data/compare/009_cleaner5_red_preview.png \
+    data/compare/009_result_red_preview.png \
+  --labels "MODEL 1,MODEL 1.1, MODEL 2.0" \
+  --centers 18000,45950,59100,85200,113000
+```

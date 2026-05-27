@@ -181,8 +181,8 @@ def default_roi_output_path(stem: str, temp_dir: Path) -> Path:
     return temp_dir / f"used_rois_{stem}_manual.txt"
 
 
-def default_output_dir_for_search(stem: str, temp_dir: Path, profile_name: str) -> Path:
-    return temp_dir / f"{stem}_{profile_name}_params"
+def default_output_dir_for_search(stem: str, profile_name: str) -> Path:
+    return Path("reports") / "best-values" / stem / f"{stem}_{profile_name}_params"
 
 
 def parse_rois_from_text(text: str) -> list[ROI]:
@@ -1258,7 +1258,7 @@ def main() -> None:
             "Auto finder for Levels + Threshold + Minimum/Maximum. "
             "Default project layout: image=data/chapters-long/<CH>.png, "
             "ROIs=data/temp/<CH>/used_rois_<CH>_boundary.txt, "
-            "output=data/temp/<CH>/<CH>_<profile>_params."
+            "output=reports/best-values/<CH>/<CH>_<profile>_params."
         )
     )
     parser.add_argument("image", help="Chapter id or image path. Example: 033, 033.png, data/chapters-long/033.png")
@@ -1294,13 +1294,13 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Output directory. Default: data/temp/<CH>/<CH>_<profile>_params",
+        help="Output directory. Default: reports/best-values/<CH>/<CH>_<profile>_params",
     )
     args = parser.parse_args()
 
     image_path, stem, temp_dir = resolve_image_path(args.image)
     profile = get_search_profile(args.profile, args.wide, args.morph_order)
-    output_dir = Path(args.output_dir) if args.output_dir else default_output_dir_for_search(stem, temp_dir, profile.profile_name)
+    output_dir = Path(args.output_dir) if args.output_dir else default_output_dir_for_search(stem, profile.profile_name)
 
     if args.mark_rois:
         roi_path = Path(args.roi_output) if args.roi_output else default_roi_output_path(stem, temp_dir)

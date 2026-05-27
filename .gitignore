@@ -1,6 +1,7 @@
 chapters-initial/
 chapters-long/
 chapters-results/
+chapters-cleaned/
 samples/
 logs/
 psd/
@@ -15,3 +16,4 @@ problem_candidates/
 Threshold/
 .old-samples/
 temp/
+out*.txt
