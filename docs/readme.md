@@ -85,7 +85,7 @@ python tools/evaluate.py \
 ### List
 ```bash
 python tools/evaluate.py \
-  --chapters 002,034,024 \
+  --chapters 162,119,123,118,122,096,120,121 \
 ```
 
 Optional:
