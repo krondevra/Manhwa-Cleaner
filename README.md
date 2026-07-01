@@ -1,95 +1,58 @@
-# ML Manhwa Cleaner
+# Manhwa Cleaner
 
-Remove white/black background from manhwa chapters automatically.
-
-## Problem
-
-Long manhwa chapters (~690×50,000–143,000 px) contain white gutters between frames
-that must be made transparent. The challenge: the same `#FFFFFF` appears both in
-the background *and* inside frames, speech bubbles, and text boxes.
-
-Manual cleanup in Photoshop: 2–9 hours per chapter. Goal: automate 174 chapters.
-
-## Pipeline
-
-```
-chapters-initial/   raw per-page PNGs per chapter
-chapters-long/      merged long-strip PNGs (one file per chapter)
-samples/            manually cleaned pairs (*.png + *_cleaned.png)
-models/             trained PyTorch checkpoints
-chapters-results/   ML-cleaned output PNGs
-logs/               training logs
-```
+ML pipeline for turning saved manhwa/webtoon chapters into cleaned, transparent
+long-strip PNGs: merge pages → remove background (white/black/gray, gradients,
+artifacts) while preserving frames, speech bubbles, SFX and text → cut into
+frames for downstream use.
 
 ## Approach
 
-1. **rule-based v1** — flood fill from edges through near-white pixels
-2. **rule-based v2/v3** — panel detection + keep_mask + safe flood fill
-3. **Random Trees** — supervised pixel classifier trained on one manual example
-4. **SmallUNet** — full binary segmentation model trained on manually cleaned chapters
+The background-removal problem is context-sensitive: the same pixel color can
+be either removable background or content depending on structure, so
+rule-based heuristics (flood fill, panel detection) were not enough on their
+own. The project moved through:
 
-## Dependencies
+1. **rule-based** — flood fill + panel detection (`remove_manhwa_bg.py`)
+2. **classical ML** — OpenCV Random Trees pixel classifier, single-example
+   training (did not generalise past the training image)
+3. **deep learning** — `SmallUNet` binary segmentation in PyTorch, 7-channel
+   input (RGB + threshold/morphology/Canny guidance channels derived from the
+   manual Photoshop workflow this project automates)
+4. **production tooling** — dataset prep, heuristic evaluation without ground
+   truth, hard-case mining, semi-automatic mask/ROI generation, parameter
+   search for Photoshop-style levels/threshold profiles
+
+Full history of that iteration — including abandoned approaches and why they
+were abandoned — is in the git log (`git log --oneline`).
+
+## Layout
+
+```text
+tools/      current pipeline scripts (longify, split, merge, cut_samples,
+            mask_preview_tool, mask_boundary_roi, mask_parameter_search,
+            ml_cleaner, evaluate, compare)
+scripts/    Photopea/Photoshop JSX scripts for manual/semi-auto mask creation
+docs/       command reference (docs/readme.md) and manual cleaning
+            workflow (docs/pipeline.md)
+src/        earlier standalone merge/clean/cutframes/montage pipeline
+remove_manhwa_bg.py   earliest rule-based prototype, kept for history
+```
+
+`data/`, `models/`, `reports/` are generated locally (gitignored) — chapter
+images, trained checkpoints and evaluation reports are not tracked.
+
+## Setup
 
 ```bash
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 pip install opencv-python pillow numpy
 ```
 
-## Commands
+See `docs/readme.md` for the current command reference for every tool.
 
-### Train
-```bash
-python cleaner.py train \
-  --samples samples \
-  --model models/cleaner.pt \
-  --epochs 20 --steps-per-epoch 300 --batch-size 2 --patch-size 512 --device cpu \
-  2>&1 | tee logs/train.log
-```
+## Note on training data
 
-### Resume training
-```bash
-python cleaner.py train \
-  --samples samples \
-  --model models/cleaner_next.pt \
-  --resume models/cleaner.pt \
-  --epochs 20 --steps-per-epoch 300 --batch-size 2 --patch-size 512 --device cpu
-```
-
-### Clean one chapter
-```bash
-python cleaner.py process chapters-long/005.png chapters-results/005_result.png \
-  --model models/cleaner.pt --device cpu
-```
-
-### Clean all chapters
-```bash
-python cleaner.py process-folder \
-  --input chapters-long --output chapters-results \
-  --model models/cleaner.pt --device cpu
-```
-
-### Tooling
-
-**Join per-page exports into a single long-strip:**
-```bash
-python longify.py chapters-initial/ch005/ chapters-long/005.png
-```
-
-**Split a too-large chapter for processing in halves:**
-```bash
-bash split.sh chapters-long/003.png 003_top.png 003_bottom.png
-# ... process each half ...
-bash merge.sh 003_top_result.png 003_bottom_result.png chapters-results/003.png
-```
-
-## Active Learning Workflow
-
-1. Manually clean chapters 001–N in Photoshop; export pairs to `samples/`
-2. Train initial model
-3. Run `process-folder` on remaining chapters; visually inspect output
-4. For chapters where model fails, manually clean and add to `samples/`
-5. Resume training: `--resume models/r_cleaner.pt --model models/r_cleaner_vN.pt`
-6. Repeat until acceptable quality across all chapters
-
-Model was trained on 4 chapters (5 sample pairs) before it demonstrated
-generalisation to unseen chapters (~2 min inference vs. 2–9h manual).
+Earlier model checkpoints (`models/1.0`–`2.1`) were trained on copyrighted
+manhwa chapters for research/prototyping only and have been removed from this
+repository's history. The pipeline and methodology are unaffected — going
+forward, training uses an open, reproducible dataset instead.

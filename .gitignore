@@ -3,6 +3,8 @@ chapters-long/
 chapters-results/
 chapters-cleaned/
 samples/
+models/
+reports/
 logs/
 psd/
 __pycache__/
