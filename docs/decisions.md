@@ -1,11 +1,10 @@
 # Decisions
-
 Record of the notable decisions made while merging the three original
 repositories into this one (see `history.md` for why they existed
 separately in the first place).
 
 ## Merge order and method
-- Merged in order: gen1 (`1.ML-Cleaner-latest`) → gen2 (`2.Manhwa-Production`)
+- Merged in order: gen1 (`1.ML-Cleaner`) → gen2 (`2.Manhwa-Production`)
   → gen3 (`3.Manhwa-cleaner`).
 - Built as one linear rebase, not merge commits: each repository's own
   commits were replayed on top of the previous one's tip, so file paths
@@ -48,3 +47,34 @@ separately in the first place).
   `src/*.py` from gen2) were left in the working tree as historical
   artifacts rather than deleted or archived into a subfolder, to preserve
   the evolution as real, browsable history.
+
+## Which architectural solutions proved successful, and which were discarded
+Discarded:
+- Pure flood-fill from image edges (v1-v2): destroys white content trapped
+  inside frames/speech bubbles once it connects to the edge; the same pixel
+  color can be background or content depending on structure alone, which
+  flood-fill cannot see.
+- Panel detection via black horizontal lines, row-based restore, magic-wand
+  imitation (v2-v3): closer to the manual result but still consistently
+  worse than a manually cleaned reference; abandoned as a dead end rather
+  than kept as "good enough."
+- OpenCV Random Trees pixel classifier (v4-v7): trained on a single
+  original/cleaned image pair. Looked good only because it exact-copied the
+  training image's own alpha channel back out — not evidence of learning.
+  Failed on unseen chapters (poor quality, ~11 minutes per chapter) and was
+  dropped in favor of real segmentation.
+
+Successful:
+- Supervised binary segmentation with a small U-Net (PyTorch), 7-channel
+  input: RGB plus threshold/morphological-open/morphological-close/Canny
+  guidance channels that directly encode the manual Photoshop workflow this
+  project automates (threshold ~90, min/max radius 2px, magic wand). This
+  was the actual turning point from "looks plausible" to "generalizes."
+- Dataset quality over quantity: the jump from model line 1.x to 2.0 came
+  from a few carefully and consistently cleaned chapters, not from adding
+  more inconsistent ones.
+- Heuristic evaluation without ground truth, used to mine hard cases instead
+  of guessing which chapters to add next; an active learning loop (clean →
+  train → test on unseen → fix failures → repeat); and semi-automatic
+  mask/ROI generation plus Photoshop-style parameter search (separate
+  black/white, hard/soft profiles) for hard cases such as black backgrounds.

@@ -1,10 +1,9 @@
 # Project History
-
 This repository is the result of merging three separate git repositories that
 were, in practice, one continuous project interrupted multiple times:
 
-1. `1.ML-Cleaner-latest` — rule-based prototypes through the first PyTorch ML
-   pivot (generation 1, `1.X.Y` commits)
+1. `1.ML-Cleaner` — rule-based prototypes through the first PyTorch ML pivot
+   (generation 1, `1.X.Y` commits)
 2. `2.Manhwa-Production` — a parallel continuation with a different file
    layout (`src/`), covering merge/clean/cutframes/montage tooling
    (generation 2, `2.X.Y` commits)
@@ -12,8 +11,7 @@ were, in practice, one continuous project interrupted multiple times:
    `tools/`/`docs/`/`scripts/`, with dataset evaluation, active learning and
    parameter-search tooling (generation 3, `3.X.Y` commits)
 
-## Why three separate repositories instead of one
-
+## Why the project went through three generations
 Not a deliberate architectural choice — a consequence of:
 
 - Lack of experience with prototyping/backing up work safely: new attempts
@@ -25,8 +23,16 @@ Not a deliberate architectural choice — a consequence of:
   again over time — each resumption effectively began a new working copy
   rather than picking up the previous one.
 
-## How it was unified
+## Why older models and data were removed
+Generations 1-3 all trained on manhwa chapters the author did not hold rights
+to; the resulting model checkpoints (`models/1.0`-`2.1`) and the training
+samples/reports behind them (`Threshold/`, `reports/`) existed only for
+private prototyping. They were removed from every commit in history because
+they should never have been distributable in the first place, not because
+the methodology built on them was wrong. The code that produced them stays;
+see `decisions.md` for exactly what was removed and how.
 
+## How it was unified
 The three repositories were merged into one linear history (this repo), in
 order gen1 → gen2 → gen3, with:
 - commit messages rewritten to a consistent `N.XX.YY` scheme (see

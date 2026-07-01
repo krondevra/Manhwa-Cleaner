@@ -1,12 +1,10 @@
 # Manhwa Cleaner
-
 ML pipeline for turning saved manhwa/webtoon chapters into cleaned, transparent
 long-strip PNGs: merge pages → remove background (white/black/gray, gradients,
 artifacts) while preserving frames, speech bubbles, SFX and text → cut into
 frames for downstream use.
 
 ## Approach
-
 The background-removal problem is context-sensitive: the same pixel color can
 be either removable background or content depending on structure, so
 rule-based heuristics (flood fill, panel detection) were not enough on their
@@ -26,7 +24,6 @@ Full history of that iteration — including abandoned approaches and why they
 were abandoned — is in the git log (`git log --oneline`).
 
 ## Layout
-
 ```text
 tools/      current pipeline scripts (longify, split, merge, cut_samples,
             mask_preview_tool, mask_boundary_roi, mask_parameter_search,
@@ -42,7 +39,6 @@ remove_manhwa_bg.py   earliest rule-based prototype, kept for history
 images, trained checkpoints and evaluation reports are not tracked.
 
 ## Setup
-
 ```bash
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 pip install opencv-python pillow numpy
@@ -51,7 +47,6 @@ pip install opencv-python pillow numpy
 See `docs/readme.md` for the current command reference for every tool.
 
 ## Note on training data
-
 Earlier model checkpoints (`models/1.0`–`2.1`) were trained on copyrighted
 manhwa chapters for research/prototyping only and have been removed from this
 repository's history. The pipeline and methodology are unaffected — going
