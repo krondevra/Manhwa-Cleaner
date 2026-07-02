@@ -62,3 +62,9 @@ the universal fully-clean target, plus `sfx_overlay_cleaned/` /
 `bubble_overlay_cleaned/` for the overlay variants. `tools/ml_cleaner.py
 train` reads `data/dataset_split/train` and `data/dataset_split/val` by
 default; see `docs/readme.md` for selecting a subset of variants.
+
+## License
+
+**Pipeline code** (all `.py` files) — [MIT License](LICENSE) © 2026 Devids Kronbergs.
+
+**Artwork and generated dataset** — derived from [Pepper & Carrot](https://www.peppercarrot.com/) by [David Revoy](https://www.davidrevoy.com/), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Attribution: **"Pepper & Carrot" by David Revoy**.
