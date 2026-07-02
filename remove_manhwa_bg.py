@@ -1,19 +1,27 @@
 #!/usr/bin/env python3
 """
-v0.3.0 — v3: built on v2, adds row-based content restore and line-panel detection.
+v0.4.0 — supervised pixel classifier via OpenCV Random Trees.
 
-Changes from v2:
-  - row-restore: for each row containing significant ink, white pixels in that
-    row that were removed are candidates for restoration (softer than area dilation)
-  - line-panel-restore: optional detection of horizontal black line pairs to
-    define panel intervals; fills them back (disabled by default — can leak fon back)
-  - debug outputs now include contour_restore, row_restore, line_panel_restore masks
+Manual rule-based restore keeps failing because identical #FFFFFF appears
+both in the gutter and inside panels. The right fix is supervised learning:
+give the algorithm one manually cleaned example and let it learn the rule.
 
-v2 worked better than the last experimental version; v3 builds on v2 baseline.
+Approach:
+  1. Load train_image + train_mask (manually cleaned PNG with alpha).
+  2. Build per-pixel features for all white pixels: local texture statistics,
+     distance to nearest dark pixel, row/column position, HSV values.
+  3. From train_mask alpha: label white pixels as delete (0) or keep (255).
+  4. Train cv2.ml.RTrees on sampled white pixels.
+  5. For a new image: build features for its white pixels, predict delete/keep.
+  6. Apply predicted mask as alpha channel.
 
 Usage:
-  python remove_manhwa_bg.py [input] [output] [--row-restore-strength light|medium]
-                                [--line-panel-restore] [--debug]
+  python remove_manhwa_bg.py 1.png 1_result.png \
+      --mode learn --train-image 1.png --train-mask 5.png
+
+  # folder mode:
+  python remove_manhwa_bg.py ./chapters ./out --folder \
+      --mode learn --train-image 1.png --train-mask 5.png
 """
 import argparse
 from pathlib import Path
@@ -24,120 +32,144 @@ from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None
 
+MAX_TRAIN_SAMPLES = 250_000
+WHITE_V_THR = 240
+WHITE_S_THR = 12
+
 
 def load_rgb(path: str | Path) -> np.ndarray:
     return np.array(Image.open(str(path)).convert("RGB"))
 
 
-def save_result(out_path: Path, rgba: np.ndarray, debug_masks: dict | None = None) -> None:
-    Image.fromarray(rgba, mode="RGBA").save(str(out_path))
-
-    remove_mask = rgba[:, :, 3] == 0
-    preview = rgba[:, :, :3].copy()
-    preview[remove_mask] = [255, 0, 0]
-    Image.fromarray(preview).save(str(out_path.with_name(out_path.stem + "_red_preview.png")))
-
-    if debug_masks:
-        for name, mask in debug_masks.items():
-            img = Image.fromarray((mask * 255).astype(np.uint8))
-            img.save(str(out_path.with_name(f"{out_path.stem}_debug_{name}.png")))
+def load_rgba(path: str | Path) -> np.ndarray:
+    return np.array(Image.open(str(path)).convert("RGBA"))
 
 
-def build_white_mask(rgb: np.ndarray, v_thr: int = 240, s_thr: int = 12) -> np.ndarray:
+def build_white_mask(rgb: np.ndarray) -> np.ndarray:
     hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-    return (hsv[:, :, 2] >= v_thr) & (hsv[:, :, 1] <= s_thr)
+    return (hsv[:, :, 2] >= WHITE_V_THR) & (hsv[:, :, 1] <= WHITE_S_THR)
 
 
-def flood_fill_from_edges(white_mask: np.ndarray) -> np.ndarray:
-    h, w = white_mask.shape
-    work = white_mask.astype(np.uint8)
-    flood = np.zeros((h + 2, w + 2), dtype=np.uint8)
-    for x in range(w):
-        if work[0, x]:
-            cv2.floodFill(work, flood, (x, 0), 2)
-        if work[h - 1, x]:
-            cv2.floodFill(work, flood, (x, h - 1), 2)
-    for y in range(h):
-        if work[y, 0]:
-            cv2.floodFill(work, flood, (0, y), 2)
-        if work[y, w - 1]:
-            cv2.floodFill(work, flood, (w - 1, y), 2)
-    return work == 2
-
-
-def restore_by_row(
-    rgb: np.ndarray,
-    remove_mask: np.ndarray,
-    white_mask: np.ndarray,
-    strength: str = "light",
-    ink_thr: float = 0.02,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Restore white pixels in rows that contain significant ink content."""
+def build_features(rgb: np.ndarray, white_mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Build feature matrix for all white pixels.
+    Returns (features [N, F], yx_coords [N, 2]).
+    """
+    h, w = rgb.shape[:2]
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    ink = (gray < 200).astype(np.float32)
-    row_ink = ink.mean(axis=1)
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
 
-    pad = {"light": 2, "medium": 8}.get(strength, 2)
-    restore = np.zeros_like(remove_mask)
+    ys, xs = np.where(white_mask)
 
-    for y, density in enumerate(row_ink):
-        if density >= ink_thr:
-            y0 = max(0, y - pad)
-            y1 = min(rgb.shape[0], y + pad + 1)
-            restore[y0:y1, :] |= white_mask[y0:y1, :] & remove_mask[y0:y1, :]
+    # Normalised position
+    norm_y = ys / h
+    norm_x = xs / w
 
-    result = remove_mask.copy()
-    result[restore] = False
-    return result, restore
+    # Local grayscale mean in 5×5 window
+    blur5 = cv2.blur(gray.astype(np.float32), (5, 5))
+    mean5 = blur5[ys, xs]
+
+    # HSV values
+    v_channel = hsv[:, :, 2].astype(np.float32)
+    s_channel = hsv[:, :, 1].astype(np.float32)
+    v_vals = v_channel[ys, xs]
+    s_vals = s_channel[ys, xs]
+
+    # Row ink density (fraction of dark pixels per row)
+    ink_row = (gray < 128).astype(np.float32).mean(axis=1)
+    row_ink = ink_row[ys]
+
+    features = np.column_stack([norm_y, norm_x, mean5, v_vals, s_vals, row_ink]).astype(np.float32)
+    coords = np.column_stack([ys, xs])
+
+    return features, coords
 
 
-def process_image(
-    rgb: np.ndarray,
-    row_restore_strength: str = "light",
-    line_panel_restore: bool = False,
-    debug: bool = False,
-) -> tuple[np.ndarray, dict]:
+def train_model(train_rgb: np.ndarray, train_rgba: np.ndarray) -> "cv2.ml.RTrees":
+    white_mask = build_white_mask(train_rgb)
+    features, coords = build_features(train_rgb, white_mask)
+
+    alpha = train_rgba[:, :, 3]
+    ys, xs = coords[:, 0], coords[:, 1]
+    labels = (alpha[ys, xs] < 128).astype(np.int32)  # 1 = delete, 0 = keep
+
+    # Downsample for speed
+    if len(features) > MAX_TRAIN_SAMPLES:
+        idx = np.random.choice(len(features), MAX_TRAIN_SAMPLES, replace=False)
+        features = features[idx]
+        labels = labels[idx]
+
+    model = cv2.ml.RTrees_create()
+    model.setMaxDepth(12)
+    model.setMinSampleCount(10)
+    model.setTermCriteria((cv2.TERM_CRITERIA_MAX_ITER, 50, 0))
+    model.train(features, cv2.ml.ROW_SAMPLE, labels)
+    return model
+
+
+def apply_model(model: "cv2.ml.RTrees", rgb: np.ndarray) -> np.ndarray:
+    h, w = rgb.shape[:2]
     white_mask = build_white_mask(rgb)
-    outer_bg = flood_fill_from_edges(white_mask)
+    features, coords = build_features(rgb, white_mask)
 
-    remove_mask, row_restore = restore_by_row(rgb, outer_bg, white_mask, row_restore_strength)
+    _, predicted = model.predict(features)
+    predicted = predicted.flatten().astype(np.int32)
+
+    remove_mask = np.zeros((h, w), dtype=bool)
+    ys, xs = coords[:, 0], coords[:, 1]
+    remove_mask[ys[predicted == 1], xs[predicted == 1]] = True
 
     alpha = np.where(remove_mask, 0, 255).astype(np.uint8)
-    rgba = np.dstack([rgb, alpha])
+    return np.dstack([rgb, alpha])
 
-    debug_masks = {}
-    if debug:
-        debug_masks = {
-            "white_mask": white_mask,
-            "outer_bg": outer_bg,
-            "row_restore": row_restore,
-            "remove_mask": remove_mask,
-        }
 
-    return rgba, debug_masks
+def save_result(out_path: Path, rgba: np.ndarray) -> None:
+    Image.fromarray(rgba, mode="RGBA").save(str(out_path))
+    preview = rgba[:, :, :3].copy()
+    preview[rgba[:, :, 3] == 0] = [255, 0, 0]
+    Image.fromarray(preview).save(str(out_path.with_name(out_path.stem + "_red_preview.png")))
+
+
+def process_single(
+    in_path: Path,
+    out_path: Path,
+    train_image: Path,
+    train_mask: Path,
+) -> None:
+    train_rgb = load_rgb(train_image)
+    train_rgba = load_rgba(train_mask)
+    print(f"Training from: {train_image.name} + {train_mask.name}")
+    model = train_model(train_rgb, train_rgba)
+
+    rgb = load_rgb(in_path)
+    rgba = apply_model(model, rgb)
+    save_result(out_path, rgba)
+    print(f"Saved: {out_path}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("input")
     parser.add_argument("output", nargs="?", default=None)
-    parser.add_argument("--row-restore-strength", choices=["light", "medium"], default="light")
-    parser.add_argument("--line-panel-restore", action="store_true")
-    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--folder", action="store_true")
+    parser.add_argument("--mode", choices=["learn"], default="learn")
+    parser.add_argument("--train-image", required=True)
+    parser.add_argument("--train-mask", required=True)
     args = parser.parse_args()
 
-    in_path = Path(args.input)
-    out_path = Path(args.output) if args.output else in_path.with_name(in_path.stem + "_result.png")
+    train_image = Path(args.train_image)
+    train_mask = Path(args.train_mask)
 
-    rgb = load_rgb(in_path)
-    rgba, debug_masks = process_image(
-        rgb,
-        row_restore_strength=args.row_restore_strength,
-        line_panel_restore=args.line_panel_restore,
-        debug=args.debug,
-    )
-    save_result(out_path, rgba, debug_masks if args.debug else None)
-    print(f"saved: {out_path}")
+    if args.folder:
+        in_dir = Path(args.input)
+        out_dir = Path(args.output) if args.output else in_dir.parent / (in_dir.name + "_results")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for img_path in sorted(in_dir.glob("*.png")):
+            process_single(img_path, out_dir / img_path.name, train_image, train_mask)
+    else:
+        in_path = Path(args.input)
+        out_path = Path(args.output) if args.output else in_path.with_name(in_path.stem + "_result.png")
+        process_single(in_path, out_path, train_image, train_mask)
 
 
 if __name__ == "__main__":
