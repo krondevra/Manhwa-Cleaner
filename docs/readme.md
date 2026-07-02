@@ -42,38 +42,6 @@ CH=033 && python tools/cut_samples.py "$CH" \
 
 ---
 
-## mask_preview_tool.py
-```bash
-CH=033 && python tools/mask_preview_tool.py "$CH"
-```
-
----
-
-## mask_boundary_roi.py
-```bash
-CH=033 && python tools/mask_boundary_roi.py "$CH"
-```
-
----
-
-## mask_parameter_search.py
-```bash
-python tools/mask_parameter_search.py 033 \
-  --background black \
-  --top-tonal 60 \
-  --no-contact-sheets
-```
-
-Profiles: 
-```bash
---profile black-soft 
---profile black-hard
---profile white-soft
---profile white-hard
-```
-
----
-
 ## evaluate.py
 ### Range
 ```bash
@@ -97,24 +65,49 @@ Optional:
 
 ## ml_cleaner.py
 ### Train model from 0
+Trains on the Pepper & Carrot dataset split (`data/dataset_split/train/`,
+validated against `data/dataset_split/val/` for checkpoint selection)
+instead of manually cleaned manhwa samples. Each episode is self-contained:
+base variants (including `initial`) pair against their episode's own
+`initial_cleaned/` folder.
 ```bash
 python tools/ml_cleaner.py train \
-  --samples data/samples \
-  --model models/2.1.pt
+  --dataset data/dataset_split/train \
+  --val-dataset data/dataset_split/val \
+  --model data/models/4.0.pt
+```
+
+### Train on selected variants only
+```bash
+python tools/ml_cleaner.py train \
+  --dataset data/dataset_split/train \
+  --val-dataset data/dataset_split/val \
+  --variants framed,framed_jpeg,jpeg,sfx_overlay,bubble_overlay \
+  --model data/models/4.0.pt
 ```
 
 ### Continue training from model
 ```bash
 python tools/ml_cleaner.py train \
-  --samples data/samples \
-  --resume models/2.0.pt \
-  --model models/2.1.pt
+  --dataset data/dataset_split/train \
+  --val-dataset data/dataset_split/val \
+  --resume data/models/4.0.pt \
+  --model data/models/4.1.pt
+```
+
+### Disable validation (train on old, non-split dataset layouts)
+```bash
+python tools/ml_cleaner.py train \
+  --dataset data/dataset \
+  --val-dataset "" \
+  --renders-cleaned data/renders_cleaned \
+  --model data/models/3.0.pt
 ```
 
 ### Clean chapter (single)
 ```bash
 CH=003 && python tools/ml_cleaner.py process "$CH" \
-  --model models/2.0.pt \
+  --model data/models/2.0.pt \
   --red-preview
 ```
 
@@ -122,7 +115,7 @@ CH=003 && python tools/ml_cleaner.py process "$CH" \
 ```bash
 python tools/ml_cleaner.py process-list \
   --chapters 162,119,123,118,122,96,120,121,117,124 \
-  --model models/2.1.pt \
+  --model data/models/2.1.pt \
   --red-preview
 ```
 
@@ -131,7 +124,7 @@ python tools/ml_cleaner.py process-list \
 python tools/ml_cleaner.py process-range \
   --from-chapter 003 \
   --to-chapter 004 \
-  --model models/2.0.pt \
+  --model data/models/2.0.pt \
   --red-preview
 ```
 

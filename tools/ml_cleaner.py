@@ -7,9 +7,10 @@ import math
 import random
 import time
 import warnings
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -30,7 +31,24 @@ except ImportError as exc:
 VALID_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 CLEAN_SUFFIX = "_cleaned"
 
-DEFAULT_SAMPLES_DIR = Path("data/samples")
+DEFAULT_DATASET_DIR = Path("data/dataset_split/train")
+DEFAULT_VAL_DATASET_DIR = Path("data/dataset_split/val")
+# Fallback only: pre-split PepperNCarrotDataset layouts (data/dataset_split/*)
+# are self-contained and keep the universal clean target as an
+# "initial_cleaned" sibling folder inside each episode. This dir is only
+# consulted when that sibling folder is missing (older, non-split dataset
+# layouts that keep a single shared clean-render tree instead).
+DEFAULT_RENDERS_CLEANED_DIR = Path("data/renders_cleaned")
+# Base variants have no usable "cleaned" counterpart of their own (their
+# *_cleaned siblings, where present, keep a frame outline or jpeg-degraded
+# edge rather than being fully clean) -- they all pair against the one true
+# fully-clean render, "initial_cleaned" (see DEFAULT_RENDERS_CLEANED_DIR
+# fallback above for non-split layouts).
+BASE_VARIANTS = ["initial", "black", "framed", "framed_jpeg", "gradient_border", "gradient_border_inv", "jpeg"]
+# Overlay variants pair against their own *_cleaned sibling folder inside
+# the dataset dir, since the overlay content (SFX/speech bubble) must be
+# kept, not removed like a border.
+OVERLAY_VARIANTS = ["sfx_overlay", "bubble_overlay"]
 DEFAULT_CHAPTERS_LONG_DIR = Path("data/chapters-long")
 DEFAULT_CHAPTERS_RESULTS_DIR = Path("data/chapters-results")
 # Model path intentionally has no default.
@@ -230,27 +248,42 @@ def maybe_save_red_preview(enabled: bool, output_path: Path, rgb: np.ndarray, de
     log(f"saved preview: {preview}")
 
 
-def find_sample_pairs(samples_dir: Path) -> List[Tuple[Path, Path]]:
-    if not samples_dir.exists():
-        raise FileNotFoundError(f"Samples folder was not found: {samples_dir.resolve()}")
+def find_dataset_pairs(
+    dataset_dir: Path,
+    renders_cleaned_dir: Path,
+    variants: List[str],
+) -> List[Tuple[Path, Path]]:
+    if not dataset_dir.exists():
+        raise FileNotFoundError(f"Dataset folder was not found: {dataset_dir.resolve()}")
 
     pairs: List[Tuple[Path, Path]] = []
-    for src in sorted(samples_dir.iterdir()):
-        if not src.is_file():
-            continue
-        if src.suffix.lower() not in VALID_EXTENSIONS:
-            continue
-        if src.stem.endswith(CLEAN_SUFFIX):
-            continue
+    for episode_dir in sorted(p for p in dataset_dir.iterdir() if p.is_dir()):
+        self_contained_target = episode_dir / f"initial{CLEAN_SUFFIX}"
+        for variant in variants:
+            variant_dir = episode_dir / variant
+            if not variant_dir.is_dir():
+                continue
 
-        cleaned = src.with_name(src.stem + CLEAN_SUFFIX + ".png")
-        if cleaned.exists():
-            pairs.append((src, cleaned))
+            if variant in OVERLAY_VARIANTS:
+                target_dir = episode_dir / f"{variant}{CLEAN_SUFFIX}"
+            elif self_contained_target.is_dir():
+                target_dir = self_contained_target
+            else:
+                target_dir = renders_cleaned_dir / episode_dir.name
+            if not target_dir.is_dir():
+                continue
+
+            for src in sorted(variant_dir.iterdir()):
+                if src.suffix.lower() not in VALID_EXTENSIONS:
+                    continue
+                target = target_dir / src.name
+                if target.exists():
+                    pairs.append((src, target))
 
     if not pairs:
         raise FileNotFoundError(
-            f"No sample pairs were found in {samples_dir.resolve()}.\n"
-            f"Expected: 001.png + 001_cleaned.png"
+            f"No dataset pairs were found under {dataset_dir.resolve()}\n"
+            f"(target render dir: {renders_cleaned_dir.resolve()}, variants: {variants})."
         )
     return pairs
 
@@ -412,31 +445,87 @@ def augment_patch(arr: np.ndarray, mask: np.ndarray) -> Tuple[np.ndarray, np.nda
     return arr, mask
 
 
+def load_pair(original: Path, cleaned: Path, alpha_threshold: int, guidance_params: GuidanceParams) -> Tuple[np.ndarray, np.ndarray]:
+    rgb = read_rgb(original)
+    rgba = read_rgba(cleaned)
+    if rgb.shape[:2] != rgba.shape[:2]:
+        raise ValueError(f"Size mismatch: {original} and {cleaned}")
+    delete_mask = rgba[:, :, 3] < alpha_threshold
+    model_input = build_input_tensor(rgb, guidance_params)
+    return model_input, delete_mask
+
+
+def estimate_delete_ratio(pairs: List[Tuple[Path, Path]], alpha_threshold: int) -> Tuple[int, int]:
+    """One lightweight pass over target alpha channels only (no guidance
+    channels, nothing retained across iterations) to size the loss pos_weight
+    without preloading the full dataset into memory."""
+    total_delete = 0
+    total_pixels = 0
+    for _, cleaned in pairs:
+        alpha = np.asarray(Image.open(cleaned).convert("RGBA"), dtype=np.uint8)[:, :, 3]
+        mask = alpha < alpha_threshold
+        total_delete += int(mask.sum())
+        total_pixels += int(mask.size)
+    return total_delete, total_pixels
+
+
 class PatchDataset(Dataset):
-    def __init__(self, samples, patch_size: int, patches_per_epoch: int, positive_patch_ratio: float, min_positive_pixels: int, augment: bool) -> None:
-        self.samples = samples
+    """Draws random training patches from `pairs` without preloading the
+    whole dataset: each (original, cleaned) pair is read from disk and
+    converted to a model-input tensor only the first time it's picked, then
+    kept in a small LRU cache (bounded by `cache_size`) so memory use stays
+    constant regardless of dataset size. Note: with DataLoader `--workers` >
+    0, each worker process gets its own separate cache.
+    """
+
+    def __init__(
+        self,
+        pairs: List[Tuple[Path, Path]],
+        alpha_threshold: int,
+        guidance_params: GuidanceParams,
+        patch_size: int,
+        patches_per_epoch: int,
+        positive_patch_ratio: float,
+        min_positive_pixels: int,
+        augment: bool,
+        cache_size: int = 8,
+    ) -> None:
+        self.pairs = pairs
+        self.alpha_threshold = alpha_threshold
+        self.guidance_params = guidance_params
         self.patch_size = patch_size
         self.patches_per_epoch = patches_per_epoch
         self.positive_patch_ratio = positive_patch_ratio
         self.min_positive_pixels = min_positive_pixels
         self.augment = augment
-
-        self.positive_coords = []
-        for _, _, mask in self.samples:
-            ys, xs = np.where(mask)
-            self.positive_coords.append((ys, xs) if len(xs) else None)
+        self.cache_size = max(1, cache_size)
+        self._cache: "OrderedDict[int, Tuple[np.ndarray, np.ndarray, Optional[Tuple[np.ndarray, np.ndarray]]]]" = OrderedDict()
 
     def __len__(self) -> int:
         return self.patches_per_epoch
 
+    def _get(self, sample_index: int):
+        if sample_index in self._cache:
+            self._cache.move_to_end(sample_index)
+            return self._cache[sample_index]
+
+        original, cleaned = self.pairs[sample_index]
+        arr, mask = load_pair(original, cleaned, self.alpha_threshold, self.guidance_params)
+        ys, xs = np.where(mask)
+        positive_coords = (ys, xs) if len(xs) else None
+
+        self._cache[sample_index] = (arr, mask, positive_coords)
+        if len(self._cache) > self.cache_size:
+            self._cache.popitem(last=False)
+        return arr, mask, positive_coords
+
     def __getitem__(self, index: int):
         ps = self.patch_size
         for _ in range(40):
-            sample_index = random.randrange(len(self.samples))
-            _, arr, mask = self.samples[sample_index]
+            sample_index = random.randrange(len(self.pairs))
+            arr, mask, coords = self._get(sample_index)
             h, w = mask.shape
             want_positive = random.random() < self.positive_patch_ratio
-            coords = self.positive_coords[sample_index]
 
             if want_positive and coords is not None:
                 ys, xs = coords
@@ -463,7 +552,8 @@ class PatchDataset(Dataset):
             target = torch.from_numpy(mask_crop.astype(np.float32)[None, :, :])
             return image, target
 
-        _, arr, mask = random.choice(self.samples)
+        sample_index = random.randrange(len(self.pairs))
+        arr, mask, _ = self._get(sample_index)
         h, w = mask.shape
         y0 = random.randint(0, max(0, h - ps))
         x0 = random.randint(0, max(0, w - ps))
@@ -473,26 +563,6 @@ class PatchDataset(Dataset):
         image = torch.from_numpy(arr_crop.transpose(2, 0, 1).astype(np.float32))
         target = torch.from_numpy(mask_crop.astype(np.float32)[None, :, :])
         return image, target
-
-
-def load_samples(samples_dir: Path, alpha_threshold: int, guidance_params: GuidanceParams):
-    pairs = find_sample_pairs(samples_dir)
-    loaded = []
-    log(f"found {len(pairs)} sample pairs")
-
-    for original, cleaned in pairs:
-        log(f"loading sample: {original.name} + {cleaned.name}")
-        rgb = read_rgb(original)
-        rgba = read_rgba(cleaned)
-        if rgb.shape[:2] != rgba.shape[:2]:
-            raise ValueError(f"Size mismatch: {original.name} and {cleaned.name}")
-        delete_mask = rgba[:, :, 3] < alpha_threshold
-        delete_ratio = float(delete_mask.mean())
-        log(f"  size={rgb.shape[1]}x{rgb.shape[0]}, delete_ratio={delete_ratio:.4f}")
-        model_input = build_input_tensor(rgb, guidance_params)
-        loaded.append((original.name, model_input, delete_mask))
-
-    return loaded
 
 
 def save_checkpoint(path: Path, model: nn.Module, config: dict, args: argparse.Namespace) -> None:
@@ -517,10 +587,21 @@ def train_command(args: argparse.Namespace) -> None:
     log(f"device: {device}")
 
     guidance_params = GuidanceParams(threshold_value=args.threshold_value, morph_radius=args.morph_radius)
-    samples = load_samples(expand_path(args.samples), args.alpha_threshold, guidance_params)
+    variants = [v.strip() for v in args.variants.split(",") if v.strip()]
+    pairs = find_dataset_pairs(expand_path(args.dataset), expand_path(args.renders_cleaned), variants)
+    log(f"found {len(pairs)} sample pairs")
 
-    total_delete = sum(int(mask.sum()) for _, _, mask in samples)
-    total_pixels = sum(int(mask.size) for _, _, mask in samples)
+    val_pairs: Optional[List[Tuple[Path, Path]]] = None
+    if args.val_dataset:
+        val_dir = expand_path(args.val_dataset)
+        if val_dir.exists():
+            val_pairs = find_dataset_pairs(val_dir, expand_path(args.renders_cleaned), variants)
+            log(f"found {len(val_pairs)} validation pairs")
+        else:
+            log(f"validation dataset not found, skipping: {val_dir}")
+
+    log("estimating delete ratio (single pass over target alpha channels)...")
+    total_delete, total_pixels = estimate_delete_ratio(pairs, args.alpha_threshold)
     delete_ratio = total_delete / max(1, total_pixels)
     keep_ratio = 1.0 - delete_ratio
     raw_pos_weight = keep_ratio / max(delete_ratio, 1e-6)
@@ -530,16 +611,34 @@ def train_command(args: argparse.Namespace) -> None:
     log(f"pos_weight={pos_weight:.3f}")
 
     dataset = PatchDataset(
-        samples=samples,
+        pairs=pairs,
+        alpha_threshold=args.alpha_threshold,
+        guidance_params=guidance_params,
         patch_size=args.patch_size,
         patches_per_epoch=args.steps_per_epoch * args.batch_size,
         positive_patch_ratio=args.positive_patch_ratio,
         min_positive_pixels=args.min_positive_pixels,
         augment=not args.no_augment,
+        cache_size=args.cache_size,
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, pin_memory=(device.type == "cuda"), drop_last=True)
 
-    in_channels = samples[0][1].shape[2]
+    val_loader = None
+    if val_pairs:
+        val_dataset = PatchDataset(
+            pairs=val_pairs,
+            alpha_threshold=args.alpha_threshold,
+            guidance_params=guidance_params,
+            patch_size=args.patch_size,
+            patches_per_epoch=args.val_steps * args.batch_size,
+            positive_patch_ratio=args.positive_patch_ratio,
+            min_positive_pixels=args.min_positive_pixels,
+            augment=False,
+            cache_size=args.cache_size,
+        )
+        val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
+
+    in_channels = load_pair(*pairs[0], args.alpha_threshold, guidance_params)[0].shape[2]
     model = SmallUNet(in_channels=in_channels, base=args.base_channels).to(device)
     if args.resume and expand_path(args.resume).exists():
         log(f"loading checkpoint for resume: {args.resume}")
@@ -599,8 +698,23 @@ def train_command(args: argparse.Namespace) -> None:
         avg_epoch = running / max(1, seen)
         log(f"epoch {epoch}/{args.epochs} done, loss={avg_epoch:.5f}, time={time.time() - t_epoch:.1f}s")
 
-        if avg_epoch < best_loss:
-            best_loss = avg_epoch
+        tracked_loss = avg_epoch
+        if val_loader is not None and epoch % args.val_every == 0:
+            model.eval()
+            val_running = 0.0
+            val_seen = 0
+            with torch.no_grad():
+                for images, masks in val_loader:
+                    images = images.to(device, non_blocking=True)
+                    masks = masks.to(device, non_blocking=True)
+                    logits = model(images)
+                    val_running += float(criterion(logits, masks).item())
+                    val_seen += 1
+            tracked_loss = val_running / max(1, val_seen)
+            log(f"epoch {epoch}/{args.epochs} val_loss={tracked_loss:.5f}")
+
+        if tracked_loss < best_loss:
+            best_loss = tracked_loss
             save_checkpoint(model_path, model, config, args)
             log(f"saved best model: {model_path}")
 
@@ -820,7 +934,7 @@ def process_folder_command(args: argparse.Namespace) -> None:
     log("folder processing done")
 
 def add_inference_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--model", required=True, help="Required model path. Example: --model models/2.1.pt")
+    parser.add_argument("--model", required=True, help="Required model path. Example: --model data/models/2.1.pt")
     parser.add_argument("--tile-size", type=int, default=768)
     parser.add_argument("--overlap", type=int, default=96)
     parser.add_argument("--threshold", type=float, default=None, help="Override model threshold. Example: 0.45 or 0.60")
@@ -842,9 +956,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Manhwa ML cleaner for training and batch inference.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_train = sub.add_parser("train", help="Train from data/samples/* + data/samples/*_cleaned.png pairs.")
-    p_train.add_argument("--samples", default=str(DEFAULT_SAMPLES_DIR))
-    p_train.add_argument("--model", required=True, help="Required output model path. Example: --model models/2.1.pt")
+    p_train = sub.add_parser("train", help="Train from the Pepper & Carrot dataset under data/dataset_split/train/.")
+    p_train.add_argument("--dataset", default=str(DEFAULT_DATASET_DIR), help="Dataset root. Example: data/dataset_split/train")
+    p_train.add_argument(
+        "--val-dataset",
+        default=str(DEFAULT_VAL_DATASET_DIR),
+        help="Held-out split used to pick the best checkpoint. Example: data/dataset_split/val. Pass '' to disable.",
+    )
+    p_train.add_argument(
+        "--renders-cleaned",
+        default=str(DEFAULT_RENDERS_CLEANED_DIR),
+        help="Fallback universal clean-render target, only used when an episode has no self-contained "
+        "initial_cleaned/ folder. Example: data/renders_cleaned",
+    )
+    p_train.add_argument(
+        "--variants",
+        default=",".join(BASE_VARIANTS + OVERLAY_VARIANTS),
+        help="Comma-separated variant folders to train on. Example: framed,jpeg,sfx_overlay",
+    )
+    p_train.add_argument("--val-steps", type=int, default=50, help="Validation patches per epoch = val-steps * batch-size")
+    p_train.add_argument("--val-every", type=int, default=1, help="Run validation every N epochs")
+    p_train.add_argument("--model", required=True, help="Required output model path. Example: --model data/models/2.1.pt")
     p_train.add_argument("--epochs", type=int, default=10)
     p_train.add_argument("--steps-per-epoch", type=int, default=300)
     p_train.add_argument("--batch-size", type=int, default=2)
@@ -860,6 +992,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--alpha-threshold", type=int, default=128)
     p_train.add_argument("--threshold-value", type=int, default=90, help="Threshold value used for guidance channels")
     p_train.add_argument("--morph-radius", type=int, default=2, help="Morphological radius used for guidance channels")
+    p_train.add_argument(
+        "--cache-size",
+        type=int,
+        default=8,
+        help="Full images kept in the lazy-loading LRU cache (per DataLoader worker). Bounds memory regardless of dataset size.",
+    )
     p_train.add_argument("--workers", type=int, default=0)
     p_train.add_argument("--device", default="auto", help="auto, cpu, cuda")
     p_train.add_argument("--seed", type=int, default=7)

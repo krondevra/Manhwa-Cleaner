@@ -10,15 +10,14 @@ be either removable background or content depending on structure, so
 rule-based heuristics (flood fill, panel detection) were not enough on their
 own. The project moved through:
 
-1. **rule-based** — flood fill + panel detection (`remove_manhwa_bg.py`)
+1. **rule-based** — flood fill + panel detection (early prototype, since removed)
 2. **classical ML** — OpenCV Random Trees pixel classifier, single-example
    training (did not generalise past the training image)
 3. **deep learning** — `SmallUNet` binary segmentation in PyTorch, 7-channel
    input (RGB + threshold/morphology/Canny guidance channels derived from the
    manual Photoshop workflow this project automates)
 4. **production tooling** — dataset prep, heuristic evaluation without ground
-   truth, hard-case mining, semi-automatic mask/ROI generation, parameter
-   search for Photoshop-style levels/threshold profiles
+   truth, hard-case mining
 
 Full history of that iteration — including abandoned approaches and why they
 were abandoned — is in the git log (`git log --oneline`).
@@ -26,17 +25,15 @@ were abandoned — is in the git log (`git log --oneline`).
 ## Layout
 ```text
 tools/      current pipeline scripts (longify, split, merge, cut_samples,
-            mask_preview_tool, mask_boundary_roi, mask_parameter_search,
             ml_cleaner, evaluate, compare)
-scripts/    Photopea/Photoshop JSX scripts for manual/semi-auto mask creation
+scripts/    Photopea/Photoshop JSX scripts for manual mask creation
 docs/       command reference (docs/readme.md) and manual cleaning
             workflow (docs/pipeline.md)
-src/        earlier standalone merge/clean/cutframes/montage pipeline
-remove_manhwa_bg.py   earliest rule-based prototype, kept for history
 ```
 
-`data/`, `models/`, `reports/` are generated locally (gitignored) — chapter
-images, trained checkpoints and evaluation reports are not tracked.
+`data/` (dataset, chapter images, trained checkpoints under `data/models/`)
+and `reports/` are generated/copied locally (gitignored) — not tracked.
+See "Training data" below for the expected `data/` layout.
 
 ## Setup
 ```bash
@@ -46,8 +43,22 @@ pip install opencv-python pillow numpy
 
 See `docs/readme.md` for the current command reference for every tool.
 
-## Note on training data
+## Training data
 Earlier model checkpoints (`models/1.0`–`2.1`) were trained on copyrighted
 manhwa chapters for research/prototyping only and have been removed from this
-repository's history. The pipeline and methodology are unaffected — going
-forward, training uses an open, reproducible dataset instead.
+repository's history. Training now uses the open, reproducible
+[Pepper & Carrot dataset](https://www.peppercarrot.com/) (CC BY 4.0), copied
+locally (gitignored, not tracked) as:
+
+```text
+data/dataset_split/train/   per-episode input variants + *_cleaned targets (training split)
+data/dataset_split/val/     same layout, held out for checkpoint selection
+data/models/                trained checkpoints (.pt + .json config)
+```
+
+Each episode folder is self-contained: every input variant (`initial`,
+`framed`, `jpeg`, ...) pairs against an `initial_cleaned/` sibling folder for
+the universal fully-clean target, plus `sfx_overlay_cleaned/` /
+`bubble_overlay_cleaned/` for the overlay variants. `tools/ml_cleaner.py
+train` reads `data/dataset_split/train` and `data/dataset_split/val` by
+default; see `docs/readme.md` for selecting a subset of variants.
