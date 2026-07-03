@@ -3,7 +3,8 @@ chapters-long/
 chapters-results/
 chapters-cleaned/
 samples/
-data/
+data/*
+!data/models/
 reports/
 logs/
 psd/
