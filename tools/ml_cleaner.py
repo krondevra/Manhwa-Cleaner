@@ -39,16 +39,20 @@ DEFAULT_VAL_DATASET_DIR = Path("data/dataset_split/val")
 # consulted when that sibling folder is missing (older, non-split dataset
 # layouts that keep a single shared clean-render tree instead).
 DEFAULT_RENDERS_CLEANED_DIR = Path("data/renders_cleaned")
-# Base variants have no usable "cleaned" counterpart of their own (their
-# *_cleaned siblings, where present, keep a frame outline or jpeg-degraded
-# edge rather than being fully clean) -- they all pair against the one true
-# fully-clean render, "initial_cleaned" (see DEFAULT_RENDERS_CLEANED_DIR
-# fallback above for non-split layouts).
+# Every variant may have its own "<variant>_cleaned" folder in the episode
+# dir; find_dataset_pairs() prefers it over the shared "initial_cleaned"
+# whenever present, since some variants' ground truth legitimately differs
+# from the fully-clean render: framed/framed_jpeg keep their outline (panel
+# frames are meant to be preserved, not stripped like background -- see
+# README's "Approach"), and the overlay/shapes variants below keep their
+# foreground marks. black/gradient_border/gradient_border_inv have no such
+# counterpart and fall back to "initial_cleaned"; plain "jpeg" has one but
+# its alpha channel is identical to "initial_cleaned" either way.
 BASE_VARIANTS = ["initial", "black", "framed", "framed_jpeg", "gradient_border", "gradient_border_inv", "jpeg"]
-# Overlay variants pair against their own *_cleaned sibling folder inside
-# the dataset dir, since the overlay content (SFX/speech bubble) must be
-# kept, not removed like a border.
-OVERLAY_VARIANTS = ["sfx_overlay", "bubble_overlay"]
+# Overlay/shapes variants pair against their own *_cleaned sibling folder
+# inside the dataset dir, since that content (SFX/speech bubble/shape marks)
+# must be kept, not removed like a border.
+OVERLAY_VARIANTS = ["sfx_overlay", "bubble_overlay", "shapes_bb", "shapes_bw", "shapes_wb", "shapes_ww"]
 DEFAULT_CHAPTERS_LONG_DIR = Path("data/chapters-long")
 DEFAULT_CHAPTERS_RESULTS_DIR = Path("data/chapters-results")
 # Model path intentionally has no default.
@@ -264,8 +268,9 @@ def find_dataset_pairs(
             if not variant_dir.is_dir():
                 continue
 
-            if variant in OVERLAY_VARIANTS:
-                target_dir = episode_dir / f"{variant}{CLEAN_SUFFIX}"
+            own_target = episode_dir / f"{variant}{CLEAN_SUFFIX}"
+            if own_target.is_dir():
+                target_dir = own_target
             elif self_contained_target.is_dir():
                 target_dir = self_contained_target
             else:
