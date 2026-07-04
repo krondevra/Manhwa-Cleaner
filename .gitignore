@@ -5,6 +5,17 @@ chapters-cleaned/
 samples/
 data/*
 !data/models/
+# Legacy models.
+data/models/1.0.json
+data/models/1.0.pt
+data/models/1.1.json
+data/models/1.1.pt
+data/models/1.2.json
+data/models/1.2.pt
+data/models/2.0.json
+data/models/2.0.pt
+data/models/2.1.json
+data/models/2.1.pt
 reports/
 logs/
 psd/
