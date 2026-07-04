@@ -813,6 +813,39 @@ def postprocess_delete_mask(delete_mask: np.ndarray, close_radius: int, open_rad
     return mask.astype(bool)
 
 
+def protect_frame_borders(rgb: np.ndarray, delete_mask: np.ndarray, band_px: int, darkness_threshold: int) -> np.ndarray:
+    """Manhwa panels reliably carry a thin (1-2px) near-black border at the
+    top/bottom of every frame, and left/right too on narrow panels. That
+    border sits directly on the seam between kept art and deletable
+    background, so it's exactly the kind of thin feature tile-blended
+    inference and morphological closing can erode: a stray low-confidence
+    pixel flips to "delete" and the border comes out unevenly eaten (jagged
+    intrusion visible where it should be a clean straight line).
+
+    Reclaim it with a direct rule instead of hoping the network gets a 1px
+    line right on its own: any pixel currently marked "delete" that is both
+    near-black and within `band_px` of kept content is forced back to "keep".
+    Restricting to pixels near existing kept content (not just any dark
+    pixel) keeps this from clawing back real black backgrounds far from any
+    panel -- those never get within band_px of a keep pixel in the first
+    place. Must run after `postprocess_delete_mask`: MORPH_CLOSE on the
+    delete mask can bridge straight back over a thin protected notch."""
+    if band_px <= 0:
+        return delete_mask
+
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    near_black = gray <= darkness_threshold
+
+    keep_mask = (~delete_mask).astype(np.uint8)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (band_px * 2 + 1, band_px * 2 + 1))
+    keep_nearby = cv2.dilate(keep_mask, k, iterations=1) > 0
+
+    protect = near_black & keep_nearby & delete_mask
+    fixed = delete_mask.copy()
+    fixed[protect] = False
+    return fixed
+
+
 def process_command(args: argparse.Namespace) -> None:
     device = choose_device(args.device)
     log(f"device: {device}")
@@ -849,6 +882,9 @@ def process_command(args: argparse.Namespace) -> None:
 
     if args.postprocess:
         delete_mask = postprocess_delete_mask(delete_mask, args.close_radius, args.open_radius)
+
+    if args.protect_borders:
+        delete_mask = protect_frame_borders(rgb, delete_mask, args.border_band, args.border_darkness)
 
     save_rgba(output_path, rgb, delete_mask)
     log(f"saved: {output_path}")
@@ -927,6 +963,9 @@ def process_folder_command(args: argparse.Namespace) -> None:
         if args.postprocess:
             delete_mask = postprocess_delete_mask(delete_mask, args.close_radius, args.open_radius)
 
+        if args.protect_borders:
+            delete_mask = protect_frame_borders(rgb, delete_mask, args.border_band, args.border_darkness)
+
         save_rgba(output_path, rgb, delete_mask)
 
         maybe_save_red_preview(
@@ -955,6 +994,14 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--threshold-value", type=int, default=90)
     parser.add_argument("--morph-radius", type=int, default=2)
+    parser.add_argument(
+        "--protect-borders",
+        action="store_true",
+        help="Force thin near-black panel borders (1-2px, top/bottom and left/right on narrow "
+        "panels) that sit near kept content back to 'keep', fixing uneven border erosion.",
+    )
+    parser.add_argument("--border-band", type=int, default=3, help="Max px from kept content to protect")
+    parser.add_argument("--border-darkness", type=int, default=40, help="Grayscale <= this counts as 'near-black'")
 
 
 def build_parser() -> argparse.ArgumentParser:
