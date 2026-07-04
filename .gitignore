@@ -20,3 +20,4 @@ Threshold/
 .old-samples/
 temp/
 out*.txt
+.tmp/
