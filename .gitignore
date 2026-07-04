@@ -21,3 +21,4 @@ Threshold/
 temp/
 out*.txt
 .tmp/
+.directory

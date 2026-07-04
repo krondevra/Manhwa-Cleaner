@@ -151,15 +151,25 @@ def resolve_chapter_input(value: str | Path, chapters_dir: Path = DEFAULT_CHAPTE
     return path
 
 
+def model_version_prefix(model_path: Path) -> str:
+    """e.g. data/models/3.0.pt -> "v3.0-", so output filenames show which
+    checkpoint produced them (075_result.png -> v3.0-075_result.png)."""
+    version = model_path.stem
+    if version.lower().startswith("v"):
+        return f"{version}-"
+    return f"v{version}-"
+
+
 def resolve_chapter_output(
     input_path: Path,
     output_value: str | None,
     output_dir: Path = DEFAULT_CHAPTERS_RESULTS_DIR,
+    filename_prefix: str = "",
 ) -> Path:
     if output_value:
         return expand_path(output_value)
 
-    return output_dir / f"{input_path.stem}_result.png"
+    return output_dir / f"{filename_prefix}{input_path.stem}_result.png"
 
 
 def discover_input_files(
@@ -871,7 +881,9 @@ def process_command(args: argparse.Namespace) -> None:
     )
 
     input_path = resolve_chapter_input(args.input, DEFAULT_CHAPTERS_LONG_DIR)
-    output_path = resolve_chapter_output(input_path, args.output, DEFAULT_CHAPTERS_RESULTS_DIR)
+    output_path = resolve_chapter_output(
+        input_path, args.output, DEFAULT_CHAPTERS_RESULTS_DIR, model_version_prefix(model_path)
+    )
 
     if not input_path.exists():
         raise FileNotFoundError(f"Input image not found: {input_path}")
@@ -951,13 +963,15 @@ def process_folder_command(args: argparse.Namespace) -> None:
         morph_radius=int(config.get("morph_radius", args.morph_radius)),
     )
 
+    prefix = model_version_prefix(model_path)
+
     log(f"model: {model_path}")
     log(f"input: {input_dir}")
     log(f"output: {output_dir}")
     log(f"processing {len(files)} files")
 
     for i, input_path in enumerate(files, start=1):
-        output_path = output_dir / f"{input_path.stem}_result.png"
+        output_path = output_dir / f"{prefix}{input_path.stem}_result.png"
         log(f"[{i}/{len(files)}] {input_path.name} -> {output_path.name}")
 
         rgb = read_rgb(input_path)
