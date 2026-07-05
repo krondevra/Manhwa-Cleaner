@@ -317,13 +317,31 @@ def find_dataset_pairs(
 
 @dataclass
 class GuidanceParams:
-    threshold_value: int = 90
+    threshold_value: int = 30
     morph_radius: int = 2
 
 
 def make_guidance_channels(rgb: np.ndarray, params: GuidanceParams) -> np.ndarray:
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    threshold_bin = (gray <= params.threshold_value).astype(np.uint8) * 255
+
+    # Local contrast (morphological gradient: dilate - erode in a small
+    # neighborhood), not an absolute darkness cutoff. "gray <= threshold_value"
+    # only ever fires for dark pixels, so light/white ink was invisible to
+    # this channel regardless of how much real contrast surrounded it (e.g.
+    # white ink on a black background scored zero overlap with the true
+    # glyph even though the boundary is fully visible in RGB -- verified via
+    # .tmp/verify_guidance_blindspot.py). A local-contrast map is polarity-
+    # symmetric: it fires for ink lighter OR darker than its surroundings,
+    # and correctly reads near-zero wherever the composited RGB truly has no
+    # local contrast at all (ink and background sharing the exact same
+    # color) -- that residual case is a real gap in the source pixels, not
+    # something any RGB-derived detector can recover; it needs a
+    # compositing-side fix (e.g. guaranteeing a contrast margin the way
+    # PepperNCarrotDataset's synthesize_shapes.py now does for shapes_bb/ww)
+    # rather than a smarter guidance channel here.
+    contrast_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    local_contrast = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, contrast_k)
+    threshold_bin = (local_contrast >= params.threshold_value).astype(np.uint8) * 255
 
     radius = max(0, int(params.morph_radius))
     if radius > 0:
@@ -1018,7 +1036,7 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Also save *_result_red_preview.png. Disabled by default.",
     )
-    parser.add_argument("--threshold-value", type=int, default=90)
+    parser.add_argument("--threshold-value", type=int, default=30)
     parser.add_argument("--morph-radius", type=int, default=2)
     parser.add_argument(
         "--protect-borders",
@@ -1068,7 +1086,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--min-positive-pixels", type=int, default=256)
     p_train.add_argument("--threshold", type=float, default=0.50)
     p_train.add_argument("--alpha-threshold", type=int, default=128)
-    p_train.add_argument("--threshold-value", type=int, default=90, help="Threshold value used for guidance channels")
+    p_train.add_argument("--threshold-value", type=int, default=30, help="Local-contrast magnitude threshold used for guidance channels")
     p_train.add_argument("--morph-radius", type=int, default=2, help="Morphological radius used for guidance channels")
     p_train.add_argument(
         "--cache-size",
