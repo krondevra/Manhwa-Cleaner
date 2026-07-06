@@ -161,13 +161,16 @@ def resolve_chapter_input(value: str | Path, chapters_dir: Path = DEFAULT_CHAPTE
     return path
 
 
-def model_version_prefix(model_path: Path) -> str:
+def model_version_prefix(model_path: Path, islands: bool = False) -> str:
     """e.g. data/models/3.0.pt -> "v3.0-", so output filenames show which
-    checkpoint produced them (075_result.png -> v3.0-075_result.png)."""
+    checkpoint produced them (075_result.png -> v3.0-075_result.png).
+    With islands=True (--reclaim-islands), inserts "-islands-" so the two
+    postprocessing configurations never collide on disk
+    (v6.0-075_result.png vs v6.0-islands-075_result.png)."""
     version = model_path.stem
-    if version.lower().startswith("v"):
-        return f"{version}-"
-    return f"v{version}-"
+    if not version.lower().startswith("v"):
+        version = f"v{version}"
+    return f"{version}-islands-" if islands else f"{version}-"
 
 
 def resolve_chapter_output(
@@ -957,7 +960,8 @@ def process_command(args: argparse.Namespace) -> None:
 
     input_path = resolve_chapter_input(args.input, DEFAULT_CHAPTERS_LONG_DIR)
     output_path = resolve_chapter_output(
-        input_path, args.output, DEFAULT_CHAPTERS_RESULTS_DIR, model_version_prefix(model_path)
+        input_path, args.output, DEFAULT_CHAPTERS_RESULTS_DIR,
+        model_version_prefix(model_path, islands=args.reclaim_islands),
     )
 
     if not input_path.exists():
@@ -1041,7 +1045,7 @@ def process_folder_command(args: argparse.Namespace) -> None:
         morph_radius=int(config.get("morph_radius", args.morph_radius)),
     )
 
-    prefix = model_version_prefix(model_path)
+    prefix = model_version_prefix(model_path, islands=args.reclaim_islands)
 
     log(f"model: {model_path}")
     log(f"input: {input_dir}")
