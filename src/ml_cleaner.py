@@ -713,6 +713,13 @@ def train_command(args: argparse.Namespace) -> None:
         model.load_state_dict(checkpoint["state_dict"])
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    # Constant LR let loss bounce around late in training instead of settling
+    # (7.0's val_loss: 0.400/0.357/0.292/0.293/0.263/0.179 best@epoch6/0.303/
+    # 0.191/0.200/0.241) -- a rarer/finer feature like curved bubble-outline
+    # precision needs the small, stable gradient steps a decayed LR gives
+    # late in training, not the same step size as epoch 1.
+    total_steps = args.epochs * args.steps_per_epoch
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps, eta_min=args.lr * 0.1)
     criterion = DiceBCELoss(pos_weight=pos_weight, dice_weight=args.dice_weight)
     scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda" and args.amp))
 
@@ -750,6 +757,7 @@ def train_command(args: argparse.Namespace) -> None:
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
+            scheduler.step()
 
             running += float(loss.item())
             seen += 1
@@ -757,7 +765,8 @@ def train_command(args: argparse.Namespace) -> None:
             if step % args.log_every == 0 or step == args.steps_per_epoch:
                 avg = running / max(1, seen)
                 elapsed = time.time() - t_epoch
-                log(f"epoch {epoch}/{args.epochs}, step {step}/{args.steps_per_epoch}, loss={avg:.5f}, elapsed={elapsed:.1f}s")
+                log(f"epoch {epoch}/{args.epochs}, step {step}/{args.steps_per_epoch}, loss={avg:.5f}, "
+                    f"lr={scheduler.get_last_lr()[0]:.2e}, elapsed={elapsed:.1f}s")
 
             if step >= args.steps_per_epoch:
                 break
