@@ -853,6 +853,53 @@ def postprocess_delete_mask(delete_mask: np.ndarray, close_radius: int, open_rad
     return mask.astype(bool)
 
 
+def reclaim_landlocked_delete_islands(delete_mask: np.ndarray, connectivity: int = 8) -> np.ndarray:
+    """
+    A manhwa long-strip's real background/border always runs out to the
+    scanned image's edge somewhere -- the page margin spans the full strip,
+    and every panel gutter connects out to it. So a "delete" region that
+    is NOT connected (through other delete pixels) to any edge of the image
+    is topologically impossible as real background: it's an island the
+    model mistakenly carved out of content it should have kept whole (e.g.
+    a hole punched in a dark hood, or a bite eaten from deep inside a speech
+    bubble far from its own edge) -- the same connectivity failure the
+    same-color shape/background fix targeted in training data
+    (PepperNCarrotDataset's synthesize_shapes.py), showing up here as an
+    inference-time symptom rather than a training-data cause.
+
+    This only reclaims islands fully enclosed by kept content. A delete
+    region that reaches the image edge through a path of other delete
+    pixels (e.g. a bite that eats from a bubble's real border inward) is
+    left alone -- it's genuinely reachable from real background, so this
+    heuristic can't tell it apart from one.
+
+    Implemented via connected-component labeling rather than a literal
+    flood fill from the border inward (equivalent, but avoids repeatedly
+    rescanning images up to ~150k px tall): label every delete component
+    once, then keep only the ones whose bounding box touches an edge -- a
+    component's bbox reaches the image border if and only if the component
+    itself has a pixel there, so this is a one-pass replacement for
+    "flood-fill from every border pixel".
+
+    Must run after `postprocess_delete_mask`: its MORPH_CLOSE can bridge a
+    landlocked island back to a border-connected region.
+    """
+    mask = delete_mask.astype(np.uint8)
+    h, w = mask.shape
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=connectivity)
+
+    touches_border = np.zeros(num_labels, dtype=bool)
+    for label in range(1, num_labels):  # label 0 is the kept-pixel background, skip
+        x, y, cw, ch, _area = stats[label]
+        if x == 0 or y == 0 or x + cw == w or y + ch == h:
+            touches_border[label] = True
+
+    landlocked = mask.astype(bool) & ~touches_border[labels]
+    fixed = delete_mask.copy()
+    fixed[landlocked] = False
+    return fixed
+
+
 def protect_frame_borders(rgb: np.ndarray, delete_mask: np.ndarray, band_px: int, darkness_threshold: int) -> np.ndarray:
     """Manhwa panels reliably carry a thin (1-2px) near-black border at the
     top/bottom of every frame, and left/right too on narrow panels. That
@@ -924,6 +971,9 @@ def process_command(args: argparse.Namespace) -> None:
 
     if args.postprocess:
         delete_mask = postprocess_delete_mask(delete_mask, args.close_radius, args.open_radius)
+
+    if args.reclaim_islands:
+        delete_mask = reclaim_landlocked_delete_islands(delete_mask)
 
     if args.protect_borders:
         delete_mask = protect_frame_borders(rgb, delete_mask, args.border_band, args.border_darkness)
@@ -1007,6 +1057,9 @@ def process_folder_command(args: argparse.Namespace) -> None:
         if args.postprocess:
             delete_mask = postprocess_delete_mask(delete_mask, args.close_radius, args.open_radius)
 
+        if args.reclaim_islands:
+            delete_mask = reclaim_landlocked_delete_islands(delete_mask)
+
         if args.protect_borders:
             delete_mask = protect_frame_borders(rgb, delete_mask, args.border_band, args.border_darkness)
 
@@ -1031,6 +1084,14 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--postprocess", action="store_true")
     parser.add_argument("--close-radius", type=int, default=1)
     parser.add_argument("--open-radius", type=int, default=0)
+    parser.add_argument(
+        "--reclaim-islands",
+        action="store_true",
+        help="Reclaim 'delete' regions not connected to any image edge through other "
+        "delete pixels -- topologically impossible as real background, so almost "
+        "always model erosion (e.g. a hole eaten into a dark hood, or a bite deep "
+        "inside a speech bubble). Cheap, no retraining; run after --postprocess.",
+    )
     parser.add_argument(
         "--red-preview",
         action="store_true",
