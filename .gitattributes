@@ -1,4 +1,0 @@
-# These are Adobe ExtendScript files for Photopea/Photoshop automation, not
-# JavaScript/React -- they share the .jsx extension but GitHub's Linguist
-# otherwise counts them as JS in the repo language bar.
-scripts/Photopea/*.jsx linguist-vendored

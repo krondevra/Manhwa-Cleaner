@@ -26,9 +26,7 @@ were abandoned — is in the git log (`git log --oneline`).
 ```text
 src/        current pipeline scripts (longify, split, merge, cut_samples,
             ml_cleaner, evaluate, compare, compare_models_video)
-scripts/    Photopea/Photoshop JSX scripts for manual mask creation
-docs/       command reference (docs/readme.md) and manual cleaning
-            workflow (docs/pipeline.md)
+docs/       command reference (docs/readme.md)
 ```
 
 `data/` (dataset, chapter images, trained checkpoints under `data/models/`)
