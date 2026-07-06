@@ -54,24 +54,33 @@ DEFAULT_RENDERS_CLEANED_DIR = Path("data/renders_cleaned")
 # Every variant may have its own "<variant>_cleaned" folder in the episode
 # dir; find_dataset_pairs() prefers it over the shared "initial_cleaned"
 # whenever present, since these variants' ground truth legitimately differs
-# from the fully-clean render: the 2px frame/bubble outline and the context
-# mask's own binarization must be kept as part of their own target, not the
-# soft-alpha "initial_cleaned" render.
+# from the fully-clean render: the 2px frame/bubble outline must be kept as
+# part of its own target, not the soft-alpha "initial_cleaned" render.
+#
+# framed_speechbubles_context(_jpeg) and framed_speechbubles_gradient(_inv)
+# are deliberately excluded from the default training list (still generated
+# in the dataset, just not trained on): model 7.0 trained on them and
+# learned a "black ~= delete, white ~= keep" brightness shortcut that leaked
+# into real content -- the context mask is a perfectly clean, textureless
+# white=keep/black=delete rule over ~29% of base-category pairs, and the
+# gradient variant is the only family whose delete region is ever black
+# (touching the black frame border), reinforcing the same shortcut. Result:
+# v7.0 deleted large chunks of real black clothing/background and kept
+# patches of real white page margin it shouldn't have. Verified by diffing
+# v6.0 vs v7.0 red-preview crops against the same source pixels.
 BASE_VARIANTS = [
     "initial",
     "framed_speechbubles_w",
     "framed_speechbubles_w_jpeg",
-    "framed_speechbubles_gradient",
-    "framed_speechbubles_gradient_inv",
-    "framed_speechbubles_context",
-    "framed_speechbubles_context_jpeg",
 ]
 # Overlay/shapes variants pair against their own *_cleaned sibling folder
 # inside the dataset dir, since that content (SFX/speech bubble/shape marks)
 # must be kept, not removed like a border.
+# framed_speechbubles_context_sfx/_bubble excluded for the same reason as
+# framed_speechbubles_context above: they're the same flat black/white mask
+# with only a small overlay shape added, so they carry the identical
+# brightness-shortcut risk.
 OVERLAY_VARIANTS = [
-    "framed_speechbubles_context_sfx",
-    "framed_speechbubles_context_bubble",
     "framed_speechbubles_shapes_bw",
     "framed_speechbubles_shapes_mixed",
 ]
