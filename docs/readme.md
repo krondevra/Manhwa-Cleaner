@@ -82,7 +82,7 @@ python tools/ml_cleaner.py train \
 python tools/ml_cleaner.py train \
   --dataset data/dataset_split/train \
   --val-dataset data/dataset_split/val \
-  --variants framed,framed_jpeg,jpeg,sfx_overlay,bubble_overlay \
+  --variants framed_speechbubles_w,framed_speechbubles_w_jpeg,framed_speechbubles_context_sfx,framed_speechbubles_context_bubble \
   --model data/models/4.0.pt
 ```
 
