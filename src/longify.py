@@ -5,7 +5,7 @@ longify.py
 Create long vertical chapter images from folders that contain page images.
 
 Old behavior replacement:
-    python tools/longify.py data/chapters-initial --output-dir data/chapters-long
+    python src/longify.py data/chapters-initial --output-dir data/chapters-long
 
 Expected input:
     data/chapters-initial/
@@ -23,11 +23,11 @@ Default output with --name-mode folder:
     data/chapters-long/002.png
 
 Useful commands:
-    python tools/longify.py data/chapters-initial --output-dir data/chapters-long
-    python tools/longify.py data/chapters-initial --output-dir data/chapters-long --chapter 033
-    python tools/longify.py data/chapters-initial --output-dir data/chapters-long --name-mode index --start-index 0
-    python tools/longify.py data/chapters-initial --output-dir data/chapters-long --resize-mode most-common
-    python tools/longify.py data/chapters-initial --output-dir data/chapters-long --no-overwrite
+    python src/longify.py data/chapters-initial --output-dir data/chapters-long
+    python src/longify.py data/chapters-initial --output-dir data/chapters-long --chapter 033
+    python src/longify.py data/chapters-initial --output-dir data/chapters-long --name-mode index --start-index 0
+    python src/longify.py data/chapters-initial --output-dir data/chapters-long --resize-mode most-common
+    python src/longify.py data/chapters-initial --output-dir data/chapters-long --no-overwrite
 """
 
 from __future__ import annotations

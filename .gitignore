@@ -25,6 +25,7 @@ __pycache__/
 /.backup
 /materials
 /output
+# Also covers data/compare/ (compare_models_video.py output, compare.py input).
 compare/
 problem_candidates/
 Threshold/

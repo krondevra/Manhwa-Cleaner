@@ -1,7 +1,7 @@
 # Commands
 ## longify.py
 ```bash
-python tools/longify.py data/chapters-initial \
+python src/longify.py data/chapters-initial \
   --output-dir data/chapters-long \
   --name-mode index \
   --start-index 1
@@ -11,7 +11,7 @@ python tools/longify.py data/chapters-initial \
 
 ## split.py
 ```bash
-CH=033 && python tools/split.py "data/chapters-long/${CH}.png" \
+CH=033 && python src/split.py "data/chapters-long/${CH}.png" \
   --chunk 50000 \
   --output-dir "data/temp/${CH}"
 ```
@@ -20,7 +20,7 @@ CH=033 && python tools/split.py "data/chapters-long/${CH}.png" \
 
 ## merge.py
 ```bash
-CH=033 && python tools/merge.py "$CH" \
+CH=033 && python src/merge.py "$CH" \
   --dir "data/temp/${CH}" \
   --output "data/temp/${CH}/${CH}_cleaned.png"
 ```
@@ -29,7 +29,7 @@ CH=033 && python tools/merge.py "$CH" \
 
 ## cut_samples.py
 ```bash
-CH=033 && python tools/cut_samples.py "$CH" \
+CH=033 && python src/cut_samples.py "$CH" \
   --output-dir "data/temp/${CH}/cut-samples" \
   --pad-top 60 \
   --pad-bottom 50 \
@@ -45,14 +45,14 @@ CH=033 && python tools/cut_samples.py "$CH" \
 ## evaluate.py
 ### Range
 ```bash
-python tools/evaluate.py \
+python src/evaluate.py \
   --from-chapter 003 \
   --to-chapter 005
 ```
 
 ### List
 ```bash
-python tools/evaluate.py \
+python src/evaluate.py \
   --chapters 162,119,123,118,122,096,120,121 \
 ```
 
@@ -71,7 +71,7 @@ instead of manually cleaned manhwa samples. Each episode is self-contained:
 base variants (including `initial`) pair against their episode's own
 `initial_cleaned/` folder.
 ```bash
-python tools/ml_cleaner.py train \
+python src/ml_cleaner.py train \
   --dataset data/dataset_split/train \
   --val-dataset data/dataset_split/val \
   --model data/models/4.0.pt
@@ -79,16 +79,16 @@ python tools/ml_cleaner.py train \
 
 ### Train on selected variants only
 ```bash
-python tools/ml_cleaner.py train \
+python src/ml_cleaner.py train \
   --dataset data/dataset_split/train \
   --val-dataset data/dataset_split/val \
-  --variants framed_speechbubles_w,framed_speechbubles_w_jpeg,framed_speechbubles_context_sfx,framed_speechbubles_context_bubble \
+  --variants framed_speechbubles_w,framed_speechbubles_w_jpeg,framed_speechbubles_shapes_bw,framed_speechbubles_shapes_mixed \
   --model data/models/4.0.pt
 ```
 
 ### Continue training from model
 ```bash
-python tools/ml_cleaner.py train \
+python src/ml_cleaner.py train \
   --dataset data/dataset_split/train \
   --val-dataset data/dataset_split/val \
   --resume data/models/4.0.pt \
@@ -97,7 +97,7 @@ python tools/ml_cleaner.py train \
 
 ### Disable validation (train on old, non-split dataset layouts)
 ```bash
-python tools/ml_cleaner.py train \
+python src/ml_cleaner.py train \
   --dataset data/dataset \
   --val-dataset "" \
   --renders-cleaned data/renders_cleaned \
@@ -106,14 +106,14 @@ python tools/ml_cleaner.py train \
 
 ### Clean chapter (single)
 ```bash
-CH=003 && python tools/ml_cleaner.py process "$CH" \
+CH=003 && python src/ml_cleaner.py process "$CH" \
   --model data/models/2.0.pt \
   --red-preview
 ```
 
 ### list
 ```bash
-python tools/ml_cleaner.py process-list \
+python src/ml_cleaner.py process-list \
   --chapters 162,119,123,118,122,96,120,121,117,124 \
   --model data/models/2.1.pt \
   --red-preview
@@ -121,7 +121,7 @@ python tools/ml_cleaner.py process-list \
 
 ### Clean chapters (range)
 ```bash
-python tools/ml_cleaner.py process-range \
+python src/ml_cleaner.py process-range \
   --from-chapter 003 \
   --to-chapter 004 \
   --model data/models/2.0.pt \
@@ -132,7 +132,7 @@ python tools/ml_cleaner.py process-range \
 
 ## compare.py
 ```bash
-python tools/compare.py 009 \
+python src/compare.py 009 \
   --results \
     data/compare/009_cleaner4_red_preview.png \
     data/compare/009_cleaner5_red_preview.png \

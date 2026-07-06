@@ -24,8 +24,8 @@ were abandoned — is in the git log (`git log --oneline`).
 
 ## Layout
 ```text
-tools/      current pipeline scripts (longify, split, merge, cut_samples,
-            ml_cleaner, evaluate, compare)
+src/        current pipeline scripts (longify, split, merge, cut_samples,
+            ml_cleaner, evaluate, compare, compare_models_video)
 scripts/    Photopea/Photoshop JSX scripts for manual mask creation
 docs/       command reference (docs/readme.md) and manual cleaning
             workflow (docs/pipeline.md)
@@ -57,11 +57,11 @@ data/models/                trained checkpoints (.pt + .json config)
 ```
 
 Each episode folder is self-contained: every input variant (`initial`,
-`framed_speechbubles_w`, `framed_speechbubles_context`, ...) pairs against an
-`initial_cleaned/` sibling folder for the universal fully-clean target, plus
-its own `<variant>_cleaned/` sibling folder wherever the ground truth
-legitimately differs (frame/bubble outline kept, context-mask binarization,
-SFX/bubble/shape marks kept). `tools/ml_cleaner.py train` reads
+`framed_speechbubles_w`, `framed_speechbubles_shapes_bw`, ...) pairs against
+an `initial_cleaned/` sibling folder for the universal fully-clean target,
+plus its own `<variant>_cleaned/` sibling folder wherever the ground truth
+legitimately differs (frame/bubble outline kept, SFX/bubble/shape marks
+kept). `src/ml_cleaner.py train` reads
 `data/dataset_split/train` and `data/dataset_split/val` by default; see
 `docs/readme.md` for selecting a subset of variants.
 
