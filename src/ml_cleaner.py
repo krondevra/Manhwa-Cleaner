@@ -57,21 +57,51 @@ DEFAULT_RENDERS_CLEANED_DIR = Path("data/renders_cleaned")
 # from the fully-clean render: the 2px frame/bubble outline must be kept as
 # part of its own target, not the soft-alpha "initial_cleaned" render.
 #
-# framed_speechbubles_context(_jpeg) and framed_speechbubles_gradient(_inv)
-# are deliberately excluded from the default training list (still generated
-# in the dataset, just not trained on): model 7.0 trained on them and
+# framed_speechbubles_context(_jpeg) is deliberately excluded from the
+# default training list (still generated in the dataset, just not trained
+# on): model 7.0 trained on it (plus the now-removed gradient variant) and
 # learned a "black ~= delete, white ~= keep" brightness shortcut that leaked
 # into real content -- the context mask is a perfectly clean, textureless
-# white=keep/black=delete rule over ~29% of base-category pairs, and the
-# gradient variant is the only family whose delete region is ever black
-# (touching the black frame border), reinforcing the same shortcut. Result:
+# white=keep/black=delete rule over ~29% of base-category pairs. Result:
 # v7.0 deleted large chunks of real black clothing/background and kept
 # patches of real white page margin it shouldn't have. Verified by diffing
 # v6.0 vs v7.0 red-preview crops against the same source pixels.
+#
+# framed_speechbubles_gradient(_inv) was dropped entirely from the dataset
+# generator (not just excluded here) as of v9 -- it was the other variant
+# that caused the same regression (the only family whose delete region was
+# ever black, reinforcing the shortcut) and wasn't representative of any
+# real manhwa page background to begin with.
+#
+# framed_speechbubles_context_textured (the v9 attempt at a shortcut-safe
+# context mask: same keep/delete geometry, but both regions carry per-page
+# noise) turned out NOT to be safe -- model 9.0 (trained on it, otherwise
+# identical to 8.0's recipe, boundary_patch_ratio=0.0 so this isn't the
+# sampling change) reintroduced the exact v7.0 failure signature: real dark
+# clothing/hair/background deleted that v6.0-v8.0 correctly kept. Confirmed
+# by diffing v9.0 vs v8.0 red-preview crops on the same source pixels
+# (villain/hood scene, shocked-face dark-background scene). Best guess at
+# the mechanism: the injected noise (+-35 amplitude, quality-25 JPEG) was
+# aggressive enough to flood the guidance channels with fake local-contrast
+# gradients across that whole variant, and since it's the same shared model
+# weights across all variants, "noisy/busy dark texture -> lean delete"
+# likely generalized as a shortcut into real dark manhwa art. Excluded here
+# the same way flat context was -- still generated in the dataset, not
+# trained on. Don't re-attempt a noisy/textured context mask without a much
+# more conservative noise amplitude AND direct evidence it doesn't repeat
+# this failure before trusting it in BASE_VARIANTS again.
+#
+# framed_speechbubles_black is a new v9 variant (black background, near-
+# white frame) covering black-background removal directly, with real
+# shortcut-defenses the old gradient variant never had. No evidence this
+# one caused the v9.0 regression (isolating context_textured as the sole
+# suspect, since it's the only variant conceptually close to the original
+# v7.0 trigger) -- kept in.
 BASE_VARIANTS = [
     "initial",
     "framed_speechbubles_w",
     "framed_speechbubles_w_jpeg",
+    "framed_speechbubles_black",
 ]
 # Overlay/shapes variants pair against their own *_cleaned sibling folder
 # inside the dataset dir, since that content (SFX/speech bubble/shape marks)
@@ -80,9 +110,16 @@ BASE_VARIANTS = [
 # framed_speechbubles_context above: they're the same flat black/white mask
 # with only a small overlay shape added, so they carry the identical
 # brightness-shortcut risk.
+#
+# framed_speechbubles_ui_w/_ui_black (new in v9) are the sci-fi system-UI-box
+# overlay on white/black backgrounds -- procedurally generated (see
+# PepperNCarrotDataset/src/synthesize/make_ui_boxes.py), not derived from any
+# real manhwa pixels (see the no-real-manhwa-training policy).
 OVERLAY_VARIANTS = [
     "framed_speechbubles_shapes_bw",
     "framed_speechbubles_shapes_mixed",
+    "framed_speechbubles_ui_w",
+    "framed_speechbubles_ui_black",
 ]
 DEFAULT_CHAPTERS_LONG_DIR = Path("data/chapters-long")
 DEFAULT_CHAPTERS_RESULTS_DIR = Path("data/chapters-results")
@@ -556,6 +593,7 @@ class PatchDataset(Dataset):
         min_positive_pixels: int,
         augment: bool,
         cache_size: int = 8,
+        boundary_patch_ratio: float = 0.0,
     ) -> None:
         self.pairs = pairs
         self.alpha_threshold = alpha_threshold
@@ -566,7 +604,8 @@ class PatchDataset(Dataset):
         self.min_positive_pixels = min_positive_pixels
         self.augment = augment
         self.cache_size = max(1, cache_size)
-        self._cache: "OrderedDict[int, Tuple[np.ndarray, np.ndarray, Optional[Tuple[np.ndarray, np.ndarray]]]]" = OrderedDict()
+        self.boundary_patch_ratio = boundary_patch_ratio
+        self._cache: "OrderedDict[int, Tuple[np.ndarray, np.ndarray, Optional[Tuple[np.ndarray, np.ndarray]], Optional[Tuple[np.ndarray, np.ndarray]]]]" = OrderedDict()
 
     def __len__(self) -> int:
         return self.patches_per_epoch
@@ -581,21 +620,33 @@ class PatchDataset(Dataset):
         ys, xs = np.where(mask)
         positive_coords = (ys, xs) if len(xs) else None
 
-        self._cache[sample_index] = (arr, mask, positive_coords)
+        # Boundary pixels of the delete mask -- oval/UI-box/burst outlines,
+        # rect-box borders, any curved or thin edge -- as opposed to "any
+        # delete pixel", which is dominated by large flat interior regions.
+        # Targets the confirmed "clouds" defect (scalloped red/white
+        # intrusions on curved bubble outlines): a genuine model-precision
+        # gap from curved outlines being a small minority of border-pixel
+        # training examples relative to straight frame edges.
+        boundary = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8)) > 0
+        bys, bxs = np.where(boundary)
+        boundary_coords = (bys, bxs) if len(bxs) else None
+
+        self._cache[sample_index] = (arr, mask, positive_coords, boundary_coords)
         if len(self._cache) > self.cache_size:
             self._cache.popitem(last=False)
-        return arr, mask, positive_coords
+        return arr, mask, positive_coords, boundary_coords
 
     def __getitem__(self, index: int):
         ps = self.patch_size
         for _ in range(40):
             sample_index = random.randrange(len(self.pairs))
-            arr, mask, coords = self._get(sample_index)
+            arr, mask, coords, boundary_coords = self._get(sample_index)
             h, w = mask.shape
             want_positive = random.random() < self.positive_patch_ratio
 
             if want_positive and coords is not None:
-                ys, xs = coords
+                use_boundary = boundary_coords is not None and random.random() < self.boundary_patch_ratio
+                ys, xs = boundary_coords if use_boundary else coords
                 p = random.randrange(len(xs))
                 cy = int(ys[p])
                 cx = int(xs[p])
@@ -620,7 +671,7 @@ class PatchDataset(Dataset):
             return image, target
 
         sample_index = random.randrange(len(self.pairs))
-        arr, mask, _ = self._get(sample_index)
+        arr, mask, _, _ = self._get(sample_index)
         h, w = mask.shape
         y0 = random.randint(0, max(0, h - ps))
         x0 = random.randint(0, max(0, w - ps))
@@ -687,6 +738,7 @@ def train_command(args: argparse.Namespace) -> None:
         min_positive_pixels=args.min_positive_pixels,
         augment=not args.no_augment,
         cache_size=args.cache_size,
+        boundary_patch_ratio=args.boundary_patch_ratio,
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, pin_memory=(device.type == "cuda"), drop_last=True)
 
@@ -702,6 +754,7 @@ def train_command(args: argparse.Namespace) -> None:
             min_positive_pixels=args.min_positive_pixels,
             augment=False,
             cache_size=args.cache_size,
+            boundary_patch_ratio=args.boundary_patch_ratio,
         )
         val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
 
@@ -1176,6 +1229,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--dice-weight", type=float, default=0.65)
     p_train.add_argument("--max-pos-weight", type=float, default=4.0)
     p_train.add_argument("--positive-patch-ratio", type=float, default=0.70)
+    p_train.add_argument(
+        "--boundary-patch-ratio", type=float, default=0.0,
+        help="Of patches chosen as positive, fraction centered on a mask-boundary "
+        "(curved/thin outline) pixel rather than any delete pixel. Targets the "
+        "'clouds' bubble-edge imprecision; 0.0 (default) is inert -- a pure "
+        "dataset-composition training run should keep this at 0.0 so its effect "
+        "can be attributed separately from a later run with it enabled.",
+    )
     p_train.add_argument("--min-positive-pixels", type=int, default=256)
     p_train.add_argument("--threshold", type=float, default=0.50)
     p_train.add_argument("--alpha-threshold", type=int, default=128)

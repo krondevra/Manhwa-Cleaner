@@ -177,8 +177,17 @@ def compose_rows(slots, entries):
 
 
 def write_video(frames, out_path, fps, hold_sec):
+    """
+    Writes MJPG-in-.avi rather than mp4v-in-.mp4: mp4v (this ffmpeg build's
+    only software mpeg4 encoder, no libx264) hard-fails with "dimensions too
+    large for MPEG-4" once enough model versions are tiled side by side
+    (hit at 12 versions / 8412px wide -- more versions only ever grows this
+    total width over time, so the raw writer needs a codec without that
+    ceiling; --compressed still produces a normal, widely-playable .mp4 via
+    the system ffmpeg binary's libx264, unaffected by this).
+    """
     w, h = frames[0].size
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    fourcc = cv2.VideoWriter_fourcc(*"MJPG")
     writer = cv2.VideoWriter(str(out_path), fourcc, fps, (w, h))
     if not writer.isOpened():
         raise SystemExit(f"Failed to open video writer for {out_path}")
@@ -233,7 +242,9 @@ def main():
     ap.add_argument("--crop-height", type=int, default=900, help="px height of each sampled slice")
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--hold-sec", type=float, default=3.0, help="seconds each slice is held on screen")
-    ap.add_argument("--out", type=Path, default=DEFAULT_OUT_DIR / "model_comparison.mp4")
+    ap.add_argument("--out", type=Path, default=DEFAULT_OUT_DIR / "model_comparison.avi",
+                     help="Raw MJPG output path (default: data/compare/model_comparison.avi). "
+                          "Use --compressed for a normal, widely-playable .mp4.")
     ap.add_argument("--contact-sheet", action="store_true",
                      help="instead of building the video, dump a labeled thumbnail index to pick --y-offsets from")
     ap.add_argument("--contact-sheet-out", type=Path, default=DEFAULT_OUT_DIR / "contact_sheet.png")
@@ -277,7 +288,10 @@ def main():
     write_video(frames, args.out, args.fps, args.hold_sec)
 
     if args.compressed:
-        compressed_out = args.out.with_name(args.out.stem + "_compressed" + args.out.suffix)
+        # Always .mp4 regardless of --out's extension: write_compressed
+        # always produces H.264 + AAC + faststart, which belongs in an mp4
+        # container, not whatever raw-writer extension --out happens to use.
+        compressed_out = args.out.with_name(args.out.stem + "_compressed.mp4")
         write_compressed(args.out, compressed_out, max_width=args.max_width)
 
 
