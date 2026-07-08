@@ -6,16 +6,20 @@ in this repo -- each file is one model version's full chapter rendered as a
 single tall vertical strip (all pages stacked). This script crops a handful
 of horizontal slices out of that strip, tiles each slice's per-version crops
 into a row (labeled with the version tag), and writes a video that holds on
-each slice in turn so each shot is "all models, same spot".
+each slice in turn so each shot is "all models, same spot". The original,
+uncleaned source chapter (data/chapters-initial/{chapter}.png) is prepended
+as a leading "original" column when present, so each shot reads as "before,
+then every model's after".
 
 Picking where those slices come from is manual, not evenly auto-spaced --
-run with --contact-sheet first to get a scrollable index of y-offsets, pick
-the interesting ones by eye, then pass them with --y-offsets.
+run with --contact-sheet first to get a full continuous strip with a
+Y-coordinate ruler alongside it, read off the offsets you want, then pass
+them with --y-offsets.
 
 Output goes to data/compare/ (gitignored) by default.
 
 Usage (run from repo root):
-  # 1) generate an index of thumbnails with their y-offset labeled
+  # 1) generate a ruler-labeled strip to read y-offsets from
   python3 src/compare_models_video.py --contact-sheet
 
   # 2) look at data/compare/contact_sheet.png, then build the video from chosen spots
@@ -25,7 +29,6 @@ Usage (run from repo root):
   python3 src/compare_models_video.py --y-offsets 12000 48000 91000 130000 --compressed
 """
 import argparse
-import math
 import re
 import subprocess
 from pathlib import Path
@@ -37,7 +40,9 @@ from PIL import Image, ImageDraw, ImageFont
 Image.MAX_IMAGE_PIXELS = None  # these are large but trusted, locally-generated strips
 
 DEFAULT_DATA_DIR = Path("data/chapters-results")
+DEFAULT_CHAPTERS_INITIAL_DIR = Path("data/chapters-initial")
 DEFAULT_OUT_DIR = Path("data/compare")
+ORIGINAL_TAG = "original"
 # Matches both the plain "v5.0-075_result_red_preview.png" and a variant
 # with an infix like "v5.0-islands-075_result_red_preview.png" -- e.g. the
 # same checkpoint's output with --reclaim-islands postprocessing applied,
@@ -98,45 +103,47 @@ def label_font(size=FONT_SIZE):
     return ImageFont.load_default(size=size)
 
 
-def make_contact_sheet(entries, out_path, n_tiles=40, tile_w=260, cols=5):
-    """Chop the first version's strip into n_tiles labeled thumbnails (with
-    their y-offset) tiled into a grid, so you can pick real --y-offsets by
-    eye instead of guessing blind against a 100k+px-tall image."""
+def make_ruler_strip(entries, out_path, label_interval=1000, major_every=5, ruler_w=150):
+    """
+    Full continuous strip of the first version -- not chopped into a grid --
+    with Y-coordinate ruler ticks/labels down the left margin every
+    label_interval px (a bolder tick + full-width line every major_every
+    labels). Chopping into a shuffled grid of separate thumbnails (the old
+    behavior) breaks continuity right where you need it most -- you can't
+    tell where one tile ends and the next begins, or see context across a
+    tile boundary. This instead reads exactly like the source page, just
+    with a precise ruler alongside it, so picking accurate --y-offsets is a
+    matter of scrolling and reading a number, not guessing from a tile index.
+    """
     tag, path = entries[0]
     img = Image.open(path).convert("RGB")
     w, h = img.size
-    tile_h_src = h // n_tiles
-    font = label_font(20)
+    minor_font = label_font(30)
+    major_font = label_font(38)
 
-    thumbs = []
-    for i in range(n_tiles):
-        y0 = i * tile_h_src
-        y1 = h if i == n_tiles - 1 else y0 + tile_h_src
-        crop = img.crop((0, y0, w, y1))
-        scale = tile_w / w
-        thumb = crop.resize((tile_w, max(1, int((y1 - y0) * scale))))
-        labeled = Image.new("RGB", (tile_w, thumb.height + 26), BG)
-        labeled.paste(thumb, (0, 26))
-        ImageDraw.Draw(labeled).text((4, 2), f"y={y0}", fill=FG, font=font)
-        thumbs.append(labeled)
+    canvas = Image.new("RGB", (w + ruler_w, h), BG)
+    canvas.paste(img, (ruler_w, 0))
     img.close()
+    draw = ImageDraw.Draw(canvas)
 
-    rows = math.ceil(len(thumbs) / cols)
-    row_heights = [max(t.height for t in thumbs[r * cols:(r + 1) * cols]) for r in range(rows)]
-    sheet = Image.new("RGB", (tile_w * cols, sum(row_heights)), BG)
+    n_labels = 0
     y = 0
-    for r in range(rows):
-        x = 0
-        for c in range(cols):
-            idx = r * cols + c
-            if idx >= len(thumbs):
-                break
-            sheet.paste(thumbs[idx], (x, y))
-            x += tile_w
-        y += row_heights[r]
-    sheet.save(out_path)
-    print(f"Wrote contact sheet ({tag}, {n_tiles} tiles, full height {h}px) to {out_path}")
-    print("Pick a few 'y=' values from it and pass them via --y-offsets.")
+    while y < h:
+        is_major = (y // label_interval) % major_every == 0
+        if is_major:
+            draw.line([(0, y), (w + ruler_w, y)], fill=(255, 210, 0), width=1)
+            draw.line([(ruler_w - 30, y), (ruler_w, y)], fill=(255, 210, 0), width=3)
+            draw.text((4, min(h - 26, max(0, y - 16))), str(y), fill=(255, 230, 80), font=major_font)
+        else:
+            draw.line([(ruler_w - 20, y), (ruler_w, y)], fill=(180, 180, 180), width=1)
+            draw.text((4, min(h - 22, max(0, y - 12))), str(y), fill=(190, 190, 190), font=minor_font)
+        n_labels += 1
+        y += label_interval
+
+    canvas.save(out_path)
+    print(f"Wrote ruler strip ({tag}, {h}px tall, {n_labels} labels every {label_interval}px, "
+          f"bold every {major_every * label_interval}px) to {out_path}")
+    print("Scroll through it and read off 'y=' values to pass via --y-offsets.")
 
 
 def build_frames(entries, y_offsets, crop_h):
@@ -234,6 +241,12 @@ def write_compressed(in_path, out_path, max_width=1920):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
+    ap.add_argument("--chapters-initial-dir", type=Path, default=DEFAULT_CHAPTERS_INITIAL_DIR,
+                     help="where to look for the original, uncleaned {chapter}.png "
+                          "(default: data/chapters-initial) -- prepended as a leading "
+                          "'original' column when present")
+    ap.add_argument("--no-original", action="store_true",
+                     help="don't prepend the original uncleaned source image column")
     ap.add_argument("--chapter", default=None, help="chapter id, e.g. 075 (default: first one found)")
     ap.add_argument("--versions", nargs="+", default=None,
                      help="limit to these version tags, e.g. --versions v2.1 v6.0 (default: all found)")
@@ -246,9 +259,13 @@ def main():
                      help="Raw MJPG output path (default: data/compare/model_comparison.avi). "
                           "Use --compressed for a normal, widely-playable .mp4.")
     ap.add_argument("--contact-sheet", action="store_true",
-                     help="instead of building the video, dump a labeled thumbnail index to pick --y-offsets from")
+                     help="instead of building the video, dump a full continuous strip with a "
+                          "Y-coordinate ruler alongside it, to pick --y-offsets from")
     ap.add_argument("--contact-sheet-out", type=Path, default=DEFAULT_OUT_DIR / "contact_sheet.png")
-    ap.add_argument("--contact-sheet-tiles", type=int, default=40)
+    ap.add_argument("--contact-sheet-interval", type=int, default=100,
+                     help="px spacing between ruler labels (default: 100, e.g. 100 200 300 ... 900 1000)")
+    ap.add_argument("--contact-sheet-major-every", type=int, default=10,
+                     help="every Nth label is bolded with a full-width line (default: 10, i.e. every 1000px)")
     ap.add_argument("--compressed", action="store_true",
                      help="also write a compressed, capped-width H.264 copy alongside --out "
                           "(suffixed _compressed) for easier sharing")
@@ -269,11 +286,23 @@ def main():
             raise SystemExit(f"Requested version(s) not found for chapter {chapter_id}: {sorted(missing)}")
         entries = [(tag, path) for tag, path in entries if tag in wanted]
 
-    print(f"Chapter {chapter_id}: {len(entries)} model versions -> {[t for t, _ in entries]}")
+    # Prepend the original, uncleaned source chapter as a leading "before"
+    # column -- not passed through version_key() (it isn't a version tag),
+    # so it's added directly rather than sorted in with the model entries.
+    if not args.no_original:
+        original_path = args.chapters_initial_dir / f"{chapter_id}.png"
+        if original_path.exists():
+            entries = [(ORIGINAL_TAG, original_path)] + entries
+        else:
+            print(f"Note: no original source image at {original_path}, skipping '{ORIGINAL_TAG}' column")
+
+    print(f"Chapter {chapter_id}: {len(entries)} columns -> {[t for t, _ in entries]}")
 
     if args.contact_sheet:
         args.contact_sheet_out.parent.mkdir(parents=True, exist_ok=True)
-        make_contact_sheet(entries, args.contact_sheet_out, n_tiles=args.contact_sheet_tiles)
+        make_ruler_strip(entries, args.contact_sheet_out,
+                          label_interval=args.contact_sheet_interval,
+                          major_every=args.contact_sheet_major_every)
         return
 
     if not args.y_offsets:
