@@ -213,21 +213,62 @@ marker-based variant.
   pixels adjacent to kept content within the border band from erosion.
 
 ## Open / unresolved
+
+### PARTIALLY WORKED — model 10.0, white-bg-only recipe simplification
+2026-07-08: a 13-version, 6-crop comparison (v3.0-v9.0, all islands
+variants) confirmed white-bg-with-border is the domain that actually
+works, while black-bg has now failed 5 times (see below) and even v6.0/v9.0
+regressed on dark content unintentionally. Decision: pause black-bg
+entirely, focus model 10.0 purely on white-bg. `BASE_VARIANTS`/
+`OVERLAY_VARIANTS` (`3.38.1`) dropped `framed_speechbubles_black`/
+`_black_ticked`/`ui_black`, keeping only `initial`, `framed_speechbubles_w`,
+`_w_jpeg`, `shapes_bw`, `shapes_mixed`, `ui_w`.
+
+Two isolating runs: `10.0-baseline` (this recipe, `--boundary-patch-ratio
+0.0`) and `10.0` (`--boundary-patch-ratio 0.5`, the first ever nonzero test
+of that flag). Evaluated on a new fixed crop set
+(`.tmp/notes/clauds_regression_crops.md`, 3 real "clauds" bubble instances)
+plus the existing white-bg regression set.
+
+**Result: `10.0-baseline` alone (recipe simplification, no sampling
+change) is a real, visible improvement over 8.0** — smaller/gone clauds
+intrusions on 2 of 3 crops, and cleaner rendering of an unrelated white
+burst-SFX claw shape that both 8.0 and 10.0 partially bite into. **Adding
+`--boundary-patch-ratio 0.5` (model 10.0) did NOT produce a further,
+consistent improvement over 10.0-baseline** — on 2 of 3 clauds crops it
+looks closer to 8.0's severity than to 10.0-baseline's improvement (a
+bottom intrusion that 10.0-baseline eliminated reappears in 10.0). No
+white-bg regression in either checkpoint.
+
+Working theory for why boundary-patch-ratio didn't help as expected:
+biasing that heavily toward boundary/curved-outline pixels may reduce the
+diversity of clean, unambiguous "confidently white / confidently red"
+training examples the model needs to build a strong local decision
+function in the first place — over-sampling the hard cases without enough
+easy-case grounding. Untested: a lower value (e.g. 0.2-0.3) might behave
+differently; not yet tried. **Recommendation: keep `10.0-baseline` as the
+production checkpoint, not `10.0`**, pending any follow-up boundary-ratio
+tuning.
+
 - **"Clauds" — imprecise, scalloped curved bubble-outline edges.** Present
-  since v3.0, still present as of v8.0. Confirmed via postprocessing tests
-  (`--close-radius`/`--open-radius`) to be a genuine model-precision gap,
-  not an inference-side-fixable artifact. Hypothesis: curved/thin outlines
-  are a small minority of "border" pixel examples relative to straight
-  frame edges, so the model under-learns them. Cosine LR decay (`v8.0`,
-  `3.31.2`) targeted training-stability as a contributing cause — did not
-  resolve it. `--boundary-patch-ratio` (added 2026-07-07, biases positive-
-  patch sampling toward mask-boundary pixels) is the next attempt, not yet
-  trained in a full isolated run.
-- **Black-background removal**, overall: unresolved after 4 attempts (see
-  above). The one remaining untested variation is the original solid-line
-  `framed_speechbubles_black` in a clean isolated run — low expectation of
-  success given the pattern, but not yet formally ruled out. Beyond that,
-  candidates worth considering: a much higher black-bg sampling weight
+  since v3.0. Confirmed via postprocessing tests (`--close-radius`/
+  `--open-radius`) to be a genuine model-precision gap, not an
+  inference-side-fixable artifact. `--boundary-patch-ratio` at 0.5 (see
+  above) did not resolve it, and looked mildly worse than not using it at
+  all on 2/3 test crops. The white-bg-only recipe simplification
+  (10.0-baseline) helped more than the sampling change did — worth
+  investigating why before trying another sampling-side fix (e.g. is it
+  simply "fewer, more consistent variants → less competing signal", which
+  would point toward dataset composition over sampling strategy as the
+  more promising lever).
+- **Black-background removal**, overall: unresolved after **5** attempts
+  (flat context mask, noisy context mask, sparse-tick real-content marker,
+  the accidental v6.0/v9.0 regressions, — black-bg training is now paused
+  as of model 10.0, not being actively pursued). The one remaining
+  untested variation is the original solid-line `framed_speechbubles_black`
+  in a clean isolated run — low expectation of success given the pattern,
+  not formally ruled out, not currently planned. Beyond that, candidates
+  worth considering if revisited: a much higher black-bg sampling weight
   (currently ~9-10% share, may simply be too thin a counter-example signal
   to unlearn the shortcut), a loss penalty specifically for
   false-deletes on high-local-contrast dark regions, or reconsidering
