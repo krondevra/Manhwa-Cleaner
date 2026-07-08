@@ -185,7 +185,7 @@ variance. This variant has been in `BASE_VARIANTS` since v6, so this was
 silently degrading the marker signal's reliability in every "working"
 model version — didn't break white-bg (v6-v8 clearly still work), but is a
 plausible minor contributor to boundary-precision issues generally (see
-"clouds" below), and is exactly the kind of "is the marker actually pure in
+"clauds" below), and is exactly the kind of "is the marker actually pure in
 the bytes the model sees" question worth checking for any future
 marker-based variant.
 
@@ -213,7 +213,7 @@ marker-based variant.
   pixels adjacent to kept content within the border band from erosion.
 
 ## Open / unresolved
-- **"Clouds" — imprecise, scalloped curved bubble-outline edges.** Present
+- **"Clauds" — imprecise, scalloped curved bubble-outline edges.** Present
   since v3.0, still present as of v8.0. Confirmed via postprocessing tests
   (`--close-radius`/`--open-radius`) to be a genuine model-precision gap,
   not an inference-side-fixable artifact. Hypothesis: curved/thin outlines

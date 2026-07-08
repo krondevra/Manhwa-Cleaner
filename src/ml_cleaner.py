@@ -623,7 +623,7 @@ class PatchDataset(Dataset):
         # Boundary pixels of the delete mask -- oval/UI-box/burst outlines,
         # rect-box borders, any curved or thin edge -- as opposed to "any
         # delete pixel", which is dominated by large flat interior regions.
-        # Targets the confirmed "clouds" defect (scalloped red/white
+        # Targets the confirmed "clauds" defect (scalloped red/white
         # intrusions on curved bubble outlines): a genuine model-precision
         # gap from curved outlines being a small minority of border-pixel
         # training examples relative to straight frame edges.
@@ -1295,7 +1295,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--boundary-patch-ratio", type=float, default=0.0,
         help="Of patches chosen as positive, fraction centered on a mask-boundary "
         "(curved/thin outline) pixel rather than any delete pixel. Targets the "
-        "'clouds' bubble-edge imprecision; 0.0 (default) is inert -- a pure "
+        "'clauds' bubble-edge imprecision; 0.0 (default) is inert -- a pure "
         "dataset-composition training run should keep this at 0.0 so its effect "
         "can be attributed separately from a later run with it enabled.",
     )
