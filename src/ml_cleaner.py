@@ -758,6 +758,43 @@ def train_command(args: argparse.Namespace) -> None:
         )
         val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
 
+    # Per-variant val loss breakdown: the blended val_loader above answers
+    # "did the average move", not "did white-bg's own held-out loss move
+    # while a new variant (e.g. a black-bg addition) was mixed in" -- which
+    # is exactly the question a shared-weight regression needs answered.
+    # Built once here (cheap, val split is tiny) and reused every epoch.
+    variant_val_loaders: dict[str, DataLoader] = {}
+    if val_pairs and args.val_variants_breakdown:
+        val_dir = expand_path(args.val_dataset)
+        for variant in variants:
+            try:
+                v_pairs = find_dataset_pairs(val_dir, expand_path(args.renders_cleaned), [variant])
+            except FileNotFoundError:
+                continue
+            v_dataset = PatchDataset(
+                pairs=v_pairs,
+                alpha_threshold=args.alpha_threshold,
+                guidance_params=guidance_params,
+                patch_size=args.patch_size,
+                patches_per_epoch=args.val_steps_breakdown * args.batch_size,
+                positive_patch_ratio=args.positive_patch_ratio,
+                min_positive_pixels=args.min_positive_pixels,
+                augment=False,
+                # Deliberately small and NOT args.cache_size: these loaders
+                # are held alive for the whole run (one per variant, kept in
+                # variant_val_loaders across all epochs), so cache memory
+                # scales with len(variants) * cache_size on top of the main
+                # train/val loaders' own caches. args.cache_size=8 here (4
+                # variants) OOM-killed the training process at epoch 2 in
+                # practice -- confirmed via journalctl, nothing else running
+                # concurrently. 2 is enough for a cheap diagnostic pass.
+                cache_size=2,
+                boundary_patch_ratio=args.boundary_patch_ratio,
+            )
+            variant_val_loaders[variant] = DataLoader(
+                v_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
+        log(f"per-variant val breakdown enabled for: {sorted(variant_val_loaders)}")
+
     in_channels = load_pair(*pairs[0], args.alpha_threshold, guidance_params)[0].shape[2]
     model = SmallUNet(in_channels=in_channels, base=args.base_channels).to(device)
     if args.resume and expand_path(args.resume).exists():
@@ -841,6 +878,20 @@ def train_command(args: argparse.Namespace) -> None:
                     val_seen += 1
             tracked_loss = val_running / max(1, val_seen)
             log(f"epoch {epoch}/{args.epochs} val_loss={tracked_loss:.5f}")
+
+            if variant_val_loaders:
+                parts = []
+                with torch.no_grad():
+                    for variant, v_loader in variant_val_loaders.items():
+                        v_running, v_seen = 0.0, 0
+                        for images, masks in v_loader:
+                            images = images.to(device, non_blocking=True)
+                            masks = masks.to(device, non_blocking=True)
+                            logits = model(images)
+                            v_running += float(criterion(logits, masks).item())
+                            v_seen += 1
+                        parts.append(f"{variant}={v_running / max(1, v_seen):.5f}")
+                log(f"epoch {epoch}/{args.epochs} val_loss_by_variant: " + ", ".join(parts))
 
         if tracked_loss < best_loss:
             best_loss = tracked_loss
@@ -1218,6 +1269,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_train.add_argument("--val-steps", type=int, default=50, help="Validation patches per epoch = val-steps * batch-size")
     p_train.add_argument("--val-every", type=int, default=1, help="Run validation every N epochs")
+    p_train.add_argument(
+        "--val-variants-breakdown", action="store_true",
+        help="Also log val_loss per individual training variant (e.g. did "
+        "framed_speechbubles_w's own held-out loss move while a new variant "
+        "was mixed in) -- catches a shared-weight regression the blended "
+        "val_loss alone can't distinguish. Off by default (extra val passes).",
+    )
+    p_train.add_argument(
+        "--val-steps-breakdown", type=int, default=20,
+        help="Validation patches per epoch per variant, only used with --val-variants-breakdown.",
+    )
     p_train.add_argument("--model", required=True, help="Required output model path. Example: --model data/models/2.1.pt")
     p_train.add_argument("--epochs", type=int, default=10)
     p_train.add_argument("--steps-per-epoch", type=int, default=300)

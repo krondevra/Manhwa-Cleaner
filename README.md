@@ -20,13 +20,17 @@ own. The project moved through:
    truth, hard-case mining
 
 Full history of that iteration — including abandoned approaches and why they
-were abandoned — is in the git log (`git log --oneline`).
+were abandoned — is in the git log (`git log --oneline`) and, curated,
+`docs/ml_strategy_history.md` (what's been tried for background isolation
+specifically, what worked, what didn't, and why — check it before starting
+a new ML experiment).
 
 ## Layout
 ```text
 src/        current pipeline scripts (longify, split, merge, cut_samples,
             ml_cleaner, evaluate, compare, compare_models_video)
-docs/       command reference (docs/readme.md)
+docs/       command reference (docs/readme.md), strategy history
+            (docs/ml_strategy_history.md)
 ```
 
 `data/` (dataset, chapter images, trained checkpoints under `data/models/`)
