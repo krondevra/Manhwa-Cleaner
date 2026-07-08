@@ -91,17 +91,19 @@ DEFAULT_RENDERS_CLEANED_DIR = Path("data/renders_cleaned")
 # more conservative noise amplitude AND direct evidence it doesn't repeat
 # this failure before trusting it in BASE_VARIANTS again.
 #
-# framed_speechbubles_black is a new v9 variant (black background, near-
-# white frame) covering black-background removal directly, with real
-# shortcut-defenses the old gradient variant never had. No evidence this
-# one caused the v9.0 regression (isolating context_textured as the sole
-# suspect, since it's the only variant conceptually close to the original
-# v7.0 trigger) -- kept in.
+# framed_speechbubles_black/_black_ticked and framed_speechbubles_ui_black
+# (below) are excluded as of model 10.0. Black-background training has now
+# failed 5 separate times across this project's history via every mechanism
+# tried (flat context mask, noisy context mask, sparse-tick real-content
+# marker, plus the accidental v6.0/v9.0 regressions found via broad version
+# comparison) -- see docs/ml_strategy_history.md for the full writeup.
+# Paused, not abandoned: still generated in the dataset, just not trained on.
+# Model 10.0 focuses entirely on the white-bg majority case instead, which a
+# 13-version comparison confirmed is the domain that actually works well.
 BASE_VARIANTS = [
     "initial",
     "framed_speechbubles_w",
     "framed_speechbubles_w_jpeg",
-    "framed_speechbubles_black",
 ]
 # Overlay/shapes variants pair against their own *_cleaned sibling folder
 # inside the dataset dir, since that content (SFX/speech bubble/shape marks)
@@ -111,15 +113,16 @@ BASE_VARIANTS = [
 # with only a small overlay shape added, so they carry the identical
 # brightness-shortcut risk.
 #
-# framed_speechbubles_ui_w/_ui_black (new in v9) are the sci-fi system-UI-box
-# overlay on white/black backgrounds -- procedurally generated (see
+# framed_speechbubles_ui_w (new in v9) is the sci-fi system-UI-box overlay on
+# white backgrounds -- procedurally generated (see
 # PepperNCarrotDataset/src/synthesize/make_ui_boxes.py), not derived from any
 # real manhwa pixels (see the no-real-manhwa-training policy).
+# framed_speechbubles_ui_black excluded alongside the other black-bg variants
+# above (paused, not abandoned -- see docs/ml_strategy_history.md).
 OVERLAY_VARIANTS = [
     "framed_speechbubles_shapes_bw",
     "framed_speechbubles_shapes_mixed",
     "framed_speechbubles_ui_w",
-    "framed_speechbubles_ui_black",
 ]
 DEFAULT_CHAPTERS_LONG_DIR = Path("data/chapters-long")
 DEFAULT_CHAPTERS_RESULTS_DIR = Path("data/chapters-results")
