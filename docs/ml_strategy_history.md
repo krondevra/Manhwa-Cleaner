@@ -214,6 +214,59 @@ marker-based variant.
 
 ## Open / unresolved
 
+### FAILED (6th attempt, informative) — model black-1.0, dedicated black-bg-only model
+2026-07-09: after 5 attempts all training black-bg data as a ~9-10% minority share diluted
+into a white-bg-majority dataset, and a reference-image finding that real black-bg manga
+panels have no visible boundary marker at all, built a genuinely separate, dedicated model
+(`data/models/black-1.0.pt` — new naming lineage, not part of the white-bg `N.0` series) on
+**100% black-bg-composition data, zero white-bg dilution**, spanning a **marker-visibility
+spectrum**: `framed_speechbubles_black`/`_black_ticked` (existing, near-white solid/ticked),
+new `_black_gray`/`_black_gray_ticked` (mid-gray marker), new `_black_noline` (frame_color ==
+bg_color, zero visible marker — matches real references most closely, still routed through
+`panel_edge()`'s alpha-hardening, not the retired unmarked `make_black_variant()` helper).
+`PepperNCarrotDataset` `v1.24.0`. `boundary_patch_ratio=0.0` (unchanged, isolating this from
+the white-bg boundary-ratio finding). val_loss 0.319 → 0.110 (best, epoch 6); final
+per-variant val_loss tight across all 5 marker levels (0.10–0.14), no marker-visibility
+penalty visible in the loss numbers.
+
+**Result: same failure signature as attempts 1–5 — and visibly worse.** On the two established
+dark-scene crops (`085.png`, y=19226 villain/hood scene and y=21397 skeleton scene), red
+(delete) coverage is 31.6% of the villain-scene crop, near-total across both real dark
+figures — not just "large contiguous areas" like prior attempts, closer to "almost everything
+dark gets deleted." `--reclaim-islands` on vs off changes coverage by ~0.6pp (31.6% → 30.9%),
+confirming (as with the 9.0 sparse-tick attempt) this is a direct per-pixel brightness
+misclassification, not a flood-fill/connectivity problem.
+
+**Both leading hypotheses going into this experiment are now weakened, not confirmed:**
+- **Shared-weight dilution** (the untested "reconsidering whether one shared-weight model is
+  the right approach" idea from earlier writeups) — a fully dedicated model with zero
+  white-bg dilution did not fix it. If dilution were the dominant factor, removing it
+  entirely should have helped; it didn't.
+- **Wrong/missing marker convention** — even `framed_speechbubles_black_noline` (zero visible
+  marker, the variant that should most closely match real black-bg panels per the reference-
+  image finding) failed the same way, and per-variant val_loss showed no meaningful
+  difference across the marker spectrum.
+
+**New, unproven hypothesis this result raises**: the regression looking *worse* with zero
+white-bg exposure (vs. every prior diluted attempt) suggests any white-bg training data
+present may have been providing some incidental regularization/anchoring against a
+"large uniform-ish dark region → delete" shortcut, and removing it entirely let that shortcut
+run unchecked rather than removing its cause. This points away from *dataset composition*
+(dilution ratio, marker style) as the primary lever entirely, and toward something more
+architectural — e.g. `pos_weight=4.0` (biasing the loss toward finding delete regions) combined
+with the local-contrast guidance channels naturally producing low-signal gradients over large
+areas of flat/shaded real dark art, not just over genuine flat background. Not tested; flagging
+as the most promising next angle if this is picked up again, over further dataset-composition
+variations.
+
+**Recommendation: do not pursue further black-bg dataset-composition experiments (dilution
+ratio, marker style) without new evidence — 6 attempts across both axes have now failed
+identically or worse.** If revisited, test an architectural/loss-side change instead (e.g.
+lower `pos_weight` specifically for a black-bg-only run, or a loss penalty that discourages
+deleting large low-local-contrast-but-real-content regions), or reconsider whether black-bg
+support is worth pursuing at all given 6 consecutive failures across every mechanism tried so
+far. White-bg remains the sole recommended production domain (`10.0-baseline`).
+
 ### FAILED (confounded) — model 11.0-strips, manhwa-scroll dataset restructuring
 2026-07-09: hypothesis was that Pepper & Carrot's per-page renders don't
 match manhwa's single-column vertical-scroll convention (background only
@@ -304,19 +357,21 @@ tuning.
   simply "fewer, more consistent variants → less competing signal", which
   would point toward dataset composition over sampling strategy as the
   more promising lever).
-- **Black-background removal**, overall: unresolved after **5** attempts
+- **Black-background removal**, overall: unresolved after **6** attempts
   (flat context mask, noisy context mask, sparse-tick real-content marker,
-  the accidental v6.0/v9.0 regressions, — black-bg training is now paused
-  as of model 10.0, not being actively pursued). The one remaining
-  untested variation is the original solid-line `framed_speechbubles_black`
-  in a clean isolated run — low expectation of success given the pattern,
-  not formally ruled out, not currently planned. Beyond that, candidates
-  worth considering if revisited: a much higher black-bg sampling weight
-  (currently ~9-10% share, may simply be too thin a counter-example signal
-  to unlearn the shortcut), a loss penalty specifically for
-  false-deletes on high-local-contrast dark regions, or reconsidering
-  whether one shared-weight model is the right approach at all for both
-  polarities vs. e.g. a conditioning signal or a two-stage pipeline.
+  the accidental v6.0/v9.0 regressions, and now the dedicated
+  100%-black-bg-composition `black-1.0` with a marker-visibility spectrum
+  — see above, the most informative failure yet since it rules out both
+  leading hypotheses rather than just adding another data point). Both
+  "dilution" and "marker style" as the primary lever are now weakened by
+  direct evidence, not just unconfirmed. Candidates worth considering if
+  revisited: an architectural/loss-side change (lower `pos_weight` for a
+  black-bg-only run, or a loss penalty specifically discouraging deletion
+  of large low-local-contrast-but-real regions) rather than further
+  dataset-composition variations, or reconsidering whether black-bg is
+  worth pursuing at all given the pattern across 6 mechanisms. Black-bg
+  training remains paused; white-bg (`10.0-baseline`) is the sole
+  recommended production domain.
 - **UI-box overlay generalization**: new variant family (2026-07-07,
   procedural sci-fi "system UI" HUD box), low dataset share (~11% per
   category), likely needs more exposure or more shape diversity before it
