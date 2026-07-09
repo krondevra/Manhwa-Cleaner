@@ -214,6 +214,49 @@ marker-based variant.
 
 ## Open / unresolved
 
+### FAILED (confounded) — model 11.0-strips, manhwa-scroll dataset restructuring
+2026-07-09: hypothesis was that Pepper & Carrot's per-page renders don't
+match manhwa's single-column vertical-scroll convention (background only
+top/bottom, never left/right) as well as assumed, and that stitching
+conforming pages per-episode into long strips (closer to a real manhwa
+chapter's continuous structure) would help. Built
+`PepperNCarrotDataset/src/synthesize/page_conformance.py` (row-by-row
+alpha x-run scan, flags pages with side-by-side/multi-column panel rows)
+and `stitch_episode_strips.py` (drops non-conforming pages, concatenates
+survivors per episode, slices into 3503px chunks). New, isolated sibling
+tier (`renders_strips`/`dataset_strips`/`dataset_split_strips`) -- the
+existing per-page tier and every checkpoint trained on it (3.0-10.0)
+untouched.
+
+**Real-scale finding that undercut the plan going in**: the full-dataset
+classifier run found 67.1% of pages (188/280) non-conforming -- far higher
+than the ~40% estimated from the original 10-page sample. 8/39 episodes
+lost entirely (zero conforming pages). Only 92 pages survived to stitch,
+yielding 98 chunks and a much smaller training set than the per-page tier
+(528 vs 1506 train pairs, 60 vs 168 val pairs).
+
+**Result: `11.0-strips` (same recipe as `10.0-baseline`, boundary_patch_ratio
+held at 0.0, the only variable changed being the dataset tier) is clearly
+*worse* than `10.0-baseline`** on every fixed crop tested -- all 3 clauds
+crops and both standard white-bg crops show visibly larger red intrusions,
+and the claw-mark stress crop is also worse. Not a subtle or ambiguous
+result; consistent across every crop.
+
+**This is a confounded experiment, not a clean test of the stitching
+hypothesis** -- excluding 67% of pages cut training-pair volume by ~3x in
+the same run that changed the stitching/chunking structure, so the
+regression can't be attributed to "stitching doesn't help" specifically;
+it's at least as likely simple data starvation. The original per-page
+tier's own multi-column pages may also not have been as harmful as
+hypothesized (the frame-border/panel_edge() isolation may already handle
+left/right transitions adequately in practice, even if not by design).
+**Do not adopt `11.0-strips`; `10.0-baseline` remains the recommended
+production checkpoint.** If this idea is revisited, the two variables
+(page exclusion, stitching granularity) need to be separated -- e.g. test
+stitching on a size-matched subset of the per-page tier first, or salvage
+non-conforming pages' conforming sub-regions instead of dropping them
+whole, before concluding anything about the stitching mechanism itself.
+
 ### PARTIALLY WORKED — model 10.0, white-bg-only recipe simplification
 2026-07-08: a 13-version, 6-crop comparison (v3.0-v9.0, all islands
 variants) confirmed white-bg-with-border is the domain that actually
