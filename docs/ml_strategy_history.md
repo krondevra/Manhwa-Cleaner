@@ -349,16 +349,23 @@ tuning.
 - **"Clauds" — imprecise, scalloped curved bubble-outline edges.** Present
   since v3.0. Confirmed via postprocessing tests (`--close-radius`/
   `--open-radius`) to be a genuine model-precision gap, not an
-  inference-side-fixable artifact. Two levers tried and ruled out:
-  `--boundary-patch-ratio` at 0.5 (model 10.0) did not resolve it and
-  looked mildly worse on 2/3 test crops; increasing model capacity
-  `base_channels` 24→64 (model 12.0) measurably worsened it on 2/3 test
-  crops instead of helping. The white-bg-only recipe simplification
-  (10.0-baseline) remains the only change that helped — worth
-  investigating why before trying another sampling- or capacity-side fix
-  (e.g. is it simply "fewer, more consistent variants → less competing
-  signal", which would point toward dataset composition as the more
-  promising lever over both sampling strategy and capacity).
+  inference-side-fixable artifact via those two flags. `--reclaim-islands`
+  (a different, connectivity-based postprocessing flag) does substantially
+  mitigate it in practice for most bubble instances — worth using by
+  default for production output regardless of checkpoint — but it's a
+  mitigation, not a fix: the underlying raw-model precision gap is still
+  there, and doesn't catch every failure shape (see the `12.0` follow-up
+  below for a case it doesn't fix). Two training-side levers tried and
+  ruled out for the raw model: `--boundary-patch-ratio` at 0.5 (model 10.0)
+  did not resolve it and looked mildly worse on 2/3 test crops; increasing
+  model capacity `base_channels` 24→64 (model 12.0) measurably worsened it
+  instead of helping, confirmed again across a broader spot-check. The
+  white-bg-only recipe simplification (10.0-baseline) remains the only
+  training-side change that helped — worth investigating why before trying
+  another sampling- or capacity-side fix (e.g. is it simply "fewer, more
+  consistent variants → less competing signal", which would point toward
+  dataset composition as the more promising lever over both sampling
+  strategy and capacity).
 - **Black-background removal**, overall: unresolved after **6** attempts
   (flat context mask, noisy context mask, sparse-tick real-content marker,
   the accidental v6.0/v9.0 regressions, and now the dedicated
@@ -428,6 +435,29 @@ unplanned ~3.5h laptop-suspend gap mid-epoch-3 — the process survived it clean
 preserves process state, unlike a crash/reboot) and resumed automatically; real compute time was
 ~2.3h. Worth knowing if timing this again: `systemctl poweroff`/suspend during a background run
 just pauses wall-clock, it doesn't lose progress, as long as it's sleep and not a power-off.
+
+**Follow-up, same day: re-evaluated with `--reclaim-islands`, changes the picture.** The writeup
+above never tested postprocessing — a broader multi-version, multi-spot comparison (via
+`compare_models_video.py`, now with a `--screenshots` flag for saving individual comparison
+frames) checked `10.0`/`10.0-islands`/`12.0`/`12.0-islands` side by side across many more spots
+than the original 3-crop set. Two things came out of it:
+- **`--reclaim-islands` closes most of the raw-model gap.** In most bubble-edge/UI-box spots,
+  `12.0-islands` looks close to `10.0-islands` — the postprocessing fills in most of what the raw
+  `12.0` model gets wrong. Without it, raw `12.0` was consistently worse than raw `10.0` across
+  nearly every spot with a red intrusion, confirming the original finding — capacity increase is
+  still not a fix for the underlying model's edge precision.
+- **New finding, not caught by the original 3-crop set: a soft background texture (a diffuse
+  smoke/dust effect) that `10.0-islands` reconstructs as one clean connected shape gets
+  fragmented into many small disconnected specks in `12.0-islands`.** `--reclaim-islands` doesn't
+  fix this one — it only reclaims delete-regions fully enclosed by kept content, and this is the
+  opposite topology (many small keep-specks scattered through a delete region). So even with
+  postprocessing, `12.0` isn't a clean win — it trades "worse raw bubble edges, mostly hidden by
+  postprocessing" for "an occasional texture-fidelity regression postprocessing can't hide."
+
+**Updated recommendation: `--reclaim-islands` should be the default for production cleaning
+going forward, regardless of checkpoint** — it measurably helps `10.0-baseline` too, not just
+`12.0`. Checkpoint choice is unchanged: keep `10.0-baseline`, don't invest further in capacity
+increases without new evidence.
 
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
