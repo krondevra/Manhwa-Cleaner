@@ -1,0 +1,10 @@
+{
+  "model_type": "SmallUNet",
+  "in_channels": 7,
+  "base_channels": 64,
+  "patch_size": 512,
+  "threshold": 0.5,
+  "alpha_threshold": 128,
+  "threshold_value": 30,
+  "morph_radius": 2
+}
