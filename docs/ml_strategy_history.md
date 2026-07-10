@@ -349,14 +349,16 @@ tuning.
 - **"Clauds" — imprecise, scalloped curved bubble-outline edges.** Present
   since v3.0. Confirmed via postprocessing tests (`--close-radius`/
   `--open-radius`) to be a genuine model-precision gap, not an
-  inference-side-fixable artifact. `--boundary-patch-ratio` at 0.5 (see
-  above) did not resolve it, and looked mildly worse than not using it at
-  all on 2/3 test crops. The white-bg-only recipe simplification
-  (10.0-baseline) helped more than the sampling change did — worth
-  investigating why before trying another sampling-side fix (e.g. is it
-  simply "fewer, more consistent variants → less competing signal", which
-  would point toward dataset composition over sampling strategy as the
-  more promising lever).
+  inference-side-fixable artifact. Two levers tried and ruled out:
+  `--boundary-patch-ratio` at 0.5 (model 10.0) did not resolve it and
+  looked mildly worse on 2/3 test crops; increasing model capacity
+  `base_channels` 24→64 (model 12.0) measurably worsened it on 2/3 test
+  crops instead of helping. The white-bg-only recipe simplification
+  (10.0-baseline) remains the only change that helped — worth
+  investigating why before trying another sampling- or capacity-side fix
+  (e.g. is it simply "fewer, more consistent variants → less competing
+  signal", which would point toward dataset composition as the more
+  promising lever over both sampling strategy and capacity).
 - **Black-background removal**, overall: unresolved after **6** attempts
   (flat context mask, noisy context mask, sparse-tick real-content marker,
   the accidental v6.0/v9.0 regressions, and now the dedicated
@@ -376,6 +378,56 @@ tuning.
   procedural sci-fi "system UI" HUD box), low dataset share (~11% per
   category), likely needs more exposure or more shape diversity before it
   generalizes as well as the long-established bubble/frame variants.
+
+### FAILED (informative) — model 12.0, full-capacity (base_channels 24→64) U-Net on GPU
+2026-07-10: with `10.0-baseline` established as production and both the recipe simplification
+and `--boundary-patch-ratio` sampling change already tried for the "clauds" bubble-edge defect,
+tested the one remaining untried lever: model capacity. `SmallUNet`'s `base_channels` went from
+the project default 24 to 64 (the classic U-Net paper's channel progression, 64→128→256→512,
+mid=768) — same architecture class, only the width changed. Also first-ever GPU training run on
+this machine (`AMD Radeon 890M` iGPU via ROCm, `HSA_OVERRIDE_GFX_VERSION=11.0.0` required to work
+around a MIOpen/BatchNorm JIT-compile failure on `gfx1151`). Recipe otherwise identical to
+`10.0-baseline` (lr=2e-4, batch=2, patch=512, dice_weight=0.65, max_pos_weight=4.0,
+positive_patch_ratio=0.70, `boundary_patch_ratio=0.0`, 10 epochs × 300 steps) — isolates capacity
+as the single new variable. `--workers 4 --cache-size 4` (down from the project default 8/8),
+since a first attempt at this capacity OOM-crashed at 8/8; 4/4 ran the full 10 epochs cleanly
+with headroom to spare. Also did a dataset-hygiene pass alongside this run: deleted ~70G of
+abandoned variant folders (`framed_speechbubles_gradient(_inv)`, `_context*`, `_black*`,
+`_ui_black*`) already unreferenced by `BASE_VARIANTS`/`OVERLAY_VARIANTS` since `3.38.1` — no
+effect on training composition, pure disk cleanup.
+
+val_loss: 0.299 → 0.389 → 0.236 → 0.214 → 0.318 → 0.165 → 0.170 → 0.218 → 0.182 → **0.157 (best,
+epoch 10)** — noisier trajectory than `10.0-baseline` but ended on its best epoch, not a
+plateau/overfit pattern. Per-variant breakdown at epoch 10 tight (0.106–0.243), no outlier.
+
+**Result: regressed on the clauds defect specifically, on the same 3-crop set used for
+`10.0-baseline`.** Crop 1 (moderate top-notch instance): baseline shows a small top-center bite;
+12.0 shows a much larger intrusion eating both the top *and* bottom of the bubble interior. Crop
+3 (severe case): baseline's scattered small bites became a thick red ring wrapping nearly the
+entire bubble outline in 12.0 — clearly worse, not better. Crop 2 was mixed/ambiguous (different
+bite locations, not clearly better or worse than baseline). The 3 general white-bg crops (plain
+white deletion, panel/gutter transition, white-SFX-on-white stress case) were visually unchanged
+from `10.0-baseline` — the regression is isolated to curved bubble-outline precision, not general
+white-bg handling.
+
+**Capacity was not the bottleneck for the clauds defect, and increasing it measurably hurt the
+clearest test cases.** This rules out "the small U-Net doesn't have enough capacity to draw a
+precise curved edge" as the explanation — it now joins `--boundary-patch-ratio` (model 10.0) as
+a tried-and-ruled-out lever for this specific defect. No tested hypothesis yet for *why* more
+capacity hurt curved-edge precision specifically (untested guess: more expressive channels found
+an easier, coarser edge-fitting shortcut with less pressure to nail the tight curve, given the
+loss is not curvature-aware) — flagging as the open question if this is revisited, not something
+to act on without evidence. **Recommendation: keep `10.0-baseline` as the production checkpoint.**
+`data/models/12.0.pt` kept for reference, not recommended for use.
+
+Real GPU timing data point (base=64, batch=2, patch=512, `--workers 4 --cache-size 4`): steady-
+state ~1.7-2.7s/step, ~682-822s/epoch training-only, ~13-17min/epoch including blended val +
+`--val-variants-breakdown`. One-time ~6.4min delete-ratio-estimation pass per run start (separate
+from MIOpen warmup). Note: this run's wall-clock ("training finished in 392.9 min") includes an
+unplanned ~3.5h laptop-suspend gap mid-epoch-3 — the process survived it cleanly (suspend
+preserves process state, unlike a crash/reboot) and resumed automatically; real compute time was
+~2.3h. Worth knowing if timing this again: `systemctl poweroff`/suspend during a background run
+just pauses wall-clock, it doesn't lose progress, as long as it's sleep and not a power-off.
 
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
