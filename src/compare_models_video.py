@@ -27,6 +27,11 @@ Usage (run from repo root):
 
   # 3) also write a compressed, capped-width copy for easier sharing
   python3 src/compare_models_video.py --y-offsets 12000 48000 91000 130000 --compressed
+
+  # 4) also dump each slice as its own PNG (one per --y-offsets entry) --
+  #    handy when you have many coordinates and want to flip through stills
+  #    rather than scrub a video
+  python3 src/compare_models_video.py --y-offsets 12000 48000 91000 130000 --screenshots
 """
 import argparse
 import re
@@ -211,6 +216,19 @@ def write_video(frames, out_path, fps, hold_sec):
     print(f"Wrote {out_path} ({len(frames)} slices, {w}x{h}, {hold_count} frames/slice @ {fps}fps)")
 
 
+def write_screenshots(frames, y_offsets, out_dir):
+    """Save each composed slice (one row = every version at one y-offset) as
+    its own PNG, named with its y-offset so many coordinates stay easy to
+    tell apart without scrubbing through the video."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for frame, y0 in zip(frames, y_offsets):
+        path = out_dir / f"slice_y{y0}.png"
+        frame.save(path)
+        paths.append(path)
+    print(f"Wrote {len(paths)} screenshot(s) to {out_dir}")
+
+
 def write_compressed(in_path, out_path, max_width=1920):
     """
     Re-encode the raw mp4v video to H.264 with a silent audio track and a
@@ -270,6 +288,12 @@ def main():
                      help="also write a compressed, capped-width H.264 copy alongside --out "
                           "(suffixed _compressed) for easier sharing")
     ap.add_argument("--max-width", type=int, default=1920, help="width cap used by --compressed")
+    ap.add_argument("--screenshots", action="store_true",
+                     help="also save each slice (one row = every version at one y-offset) as "
+                          "its own PNG -- handy for flipping through many coordinates as "
+                          "stills instead of scrubbing the video")
+    ap.add_argument("--screenshots-dir", type=Path, default=DEFAULT_OUT_DIR / "screenshots",
+                     help="output dir for --screenshots (default: data/compare/screenshots)")
     args = ap.parse_args()
 
     chapters = discover(args.data_dir, args.chapter)
@@ -315,6 +339,9 @@ def main():
     slots = build_frames(entries, args.y_offsets, args.crop_height)
     frames = compose_rows(slots, entries)
     write_video(frames, args.out, args.fps, args.hold_sec)
+
+    if args.screenshots:
+        write_screenshots(frames, args.y_offsets, args.screenshots_dir)
 
     if args.compressed:
         # Always .mp4 regardless of --out's extension: write_compressed
