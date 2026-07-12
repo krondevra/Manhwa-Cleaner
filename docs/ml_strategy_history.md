@@ -355,17 +355,20 @@ tuning.
   default for production output regardless of checkpoint — but it's a
   mitigation, not a fix: the underlying raw-model precision gap is still
   there, and doesn't catch every failure shape (see the `12.0` follow-up
-  below for a case it doesn't fix). Two training-side levers tried and
+  below for a case it doesn't fix). Three training-side levers tried and
   ruled out for the raw model: `--boundary-patch-ratio` at 0.5 (model 10.0)
   did not resolve it and looked mildly worse on 2/3 test crops; increasing
-  model capacity `base_channels` 24→64 (model 12.0) measurably worsened it
-  instead of helping, confirmed again across a broader spot-check. The
+  model capacity `base_channels` 24→64 (model 12.0) measurably worsened it;
+  and boundary-aware loss weighting (model 13.0, `--boundary-loss-weight
+  5.0`) also worsened it, with a concrete identified mechanism (it compounds
+  multiplicatively with `pos_weight` for delete-class boundary pixels,
+  pushing the model toward *more* deletion exactly where precision matters
+  most — see the `13.0` writeup for the untested fix this suggests). The
   white-bg-only recipe simplification (10.0-baseline) remains the only
   training-side change that helped — worth investigating why before trying
-  another sampling- or capacity-side fix (e.g. is it simply "fewer, more
-  consistent variants → less competing signal", which would point toward
-  dataset composition as the more promising lever over both sampling
-  strategy and capacity).
+  another sampling-, capacity-, or loss-side fix (e.g. is it simply "fewer,
+  more consistent variants → less competing signal", which would point
+  toward dataset composition as the more promising lever over all three).
 - **Black-background removal**, overall: unresolved after **6** attempts
   (flat context mask, noisy context mask, sparse-tick real-content marker,
   the accidental v6.0/v9.0 regressions, and now the dedicated
@@ -458,6 +461,48 @@ than the original 3-crop set. Two things came out of it:
 going forward, regardless of checkpoint** — it measurably helps `10.0-baseline` too, not just
 `12.0`. Checkpoint choice is unchanged: keep `10.0-baseline`, don't invest further in capacity
 increases without new evidence.
+
+### FAILED (informative, mechanism identified) — model 13.0, boundary-aware loss weighting
+2026-07-12: after dataset composition (helped), sampling ratio (`--boundary-patch-ratio`, no
+improvement), and capacity (`base_channels` 24→64, regressed) were all tried for the "clauds"
+defect, tested the one remaining training-side lever: the loss function itself. `DiceBCELoss`
+weighed every pixel equally regardless of whether it's flat interior or a tight curved edge.
+Added `--boundary-loss-weight`/`--boundary-loss-radius` (`src/ml_cleaner.py`): reuses the
+existing `MORPH_GRADIENT` boundary detection (already used for `--boundary-patch-ratio`) to
+build a per-pixel BCE weight map, dilated to a `--boundary-loss-radius`-px band. Verified via a
+smoke test that `--boundary-loss-weight 1.0` is an exact no-op matching pre-change loss values.
+Trained `13.0-boundaryloss` with `--boundary-loss-weight 5.0 --boundary-loss-radius 3`, otherwise
+identical recipe to `10.0-baseline` (`base_channels=24`, same hyperparameters, 10 epochs × 300
+steps) — isolates the loss weighting as the single new variable. val_loss 0.566 → 0.174 (best,
+epoch 10), healthy-looking curve.
+
+**Result: regressed, not fixed — and the raw-model gap was actually a bit worse than model 12.0's
+in some spots.** Evaluated the same way as the model 12.0 follow-up (broad `compare_models_video.py
+--screenshots` spot-check across 16 coordinates, not just the 3 clauds crops, both with and
+without `--reclaim-islands`). Raw `13.0-boundaryloss` showed *larger* red intrusions than raw
+`10.0-baseline` at nearly every bubble/UI-box spot checked — 2 of the original 3 clauds crops were
+also worse, one was comparable. The 3 general white-bg crops were essentially unchanged (one
+showed a small, isolated improvement on a single bubble's top curvature — not a consistent
+pattern). With `--reclaim-islands`, both checkpoints again look similarly clean, same as model
+12.0's pattern — postprocessing hides the raw regression rather than the fix actually working.
+
+**Mechanism identified, not just "didn't work": the boundary weight and the existing
+`pos_weight` (class-imbalance correction) compound multiplicatively for delete-class boundary
+pixels in `F.binary_cross_entropy_with_logits`.** Effective weight on a boundary pixel is
+`boundary_loss_weight` if the target is "keep" but `boundary_loss_weight × pos_weight` if the
+target is "delete" (here `5 × 4 = 20x` vs `5x`) — a 4x asymmetry that wasn't accounted for in the
+design, systematically pushing the model toward predicting *more* deletion specifically at the
+pixels needing the most precision. This plausibly explains why intrusions grew instead of
+shrinking, and is a concrete, actionable insight for anyone revisiting this: **a real next attempt
+would need to either exclude boundary pixels from the `pos_weight` multiplier, or weight the
+"keep" and "delete" boundary terms independently**, not just multiply a single scalar into the
+existing weighted BCE. Not attempted here — flagging as the untested fix, not re-guessing the
+same design blind.
+
+**Recommendation: keep `10.0-baseline` as the production checkpoint.** `13.0-boundaryloss` kept
+for reference, not recommended for use. This is now the third training-side lever tried and
+ruled out for clauds specifically (sampling, capacity, and now boundary-loss-weighting as
+naively implemented) — dataset composition remains the only thing that has helped.
 
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
