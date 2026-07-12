@@ -508,8 +508,10 @@ class DiceBCELoss(nn.Module):
         self.register_buffer("pos_weight_tensor", torch.tensor([pos_weight], dtype=torch.float32))
         self.dice_weight = dice_weight
 
-    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        bce = F.binary_cross_entropy_with_logits(logits, targets, pos_weight=self.pos_weight_tensor.to(logits.device))
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor, weight: Optional[torch.Tensor] = None) -> torch.Tensor:
+        bce = F.binary_cross_entropy_with_logits(
+            logits, targets, weight=weight, pos_weight=self.pos_weight_tensor.to(logits.device)
+        )
         probs = torch.sigmoid(logits)
         dims = (1, 2, 3)
         inter = (probs * targets).sum(dims)
@@ -518,28 +520,41 @@ class DiceBCELoss(nn.Module):
         return bce * (1.0 - self.dice_weight) + dice * self.dice_weight
 
 
-def crop_with_padding(arr: np.ndarray, mask: np.ndarray, x0: int, y0: int, patch_size: int) -> Tuple[np.ndarray, np.ndarray]:
+def crop_with_padding(
+    arr: np.ndarray, mask: np.ndarray, x0: int, y0: int, patch_size: int,
+    boundary: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     h, w = mask.shape
     x1 = min(w, x0 + patch_size)
     y1 = min(h, y0 + patch_size)
     arr_crop = arr[y0:y1, x0:x1]
     mask_crop = mask[y0:y1, x0:x1]
+    boundary_crop = boundary[y0:y1, x0:x1] if boundary is not None else None
 
     if arr_crop.shape[0] == patch_size and arr_crop.shape[1] == patch_size:
-        return arr_crop.copy(), mask_crop.copy()
+        out_boundary = boundary_crop.copy() if boundary_crop is not None else None
+        return arr_crop.copy(), mask_crop.copy(), out_boundary
 
     out_arr = np.zeros((patch_size, patch_size, arr.shape[2]), dtype=arr.dtype)
     out_arr[:, :, :3] = 1.0
     out_mask = np.zeros((patch_size, patch_size), dtype=bool)
     out_arr[:arr_crop.shape[0], :arr_crop.shape[1]] = arr_crop
     out_mask[:mask_crop.shape[0], :mask_crop.shape[1]] = mask_crop
-    return out_arr, out_mask
+    out_boundary = None
+    if boundary_crop is not None:
+        out_boundary = np.zeros((patch_size, patch_size), dtype=bool)
+        out_boundary[:boundary_crop.shape[0], :boundary_crop.shape[1]] = boundary_crop
+    return out_arr, out_mask, out_boundary
 
 
-def augment_patch(arr: np.ndarray, mask: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def augment_patch(
+    arr: np.ndarray, mask: np.ndarray, weight: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     if random.random() < 0.5:
         arr = np.ascontiguousarray(arr[:, ::-1])
         mask = np.ascontiguousarray(mask[:, ::-1])
+        if weight is not None:
+            weight = np.ascontiguousarray(weight[:, ::-1])
 
     if random.random() < 0.6:
         arr = arr.copy()
@@ -549,7 +564,7 @@ def augment_patch(arr: np.ndarray, mask: np.ndarray) -> Tuple[np.ndarray, np.nda
         rgb = np.clip((rgb - 0.5) * contrast + 0.5 + brightness, 0.0, 1.0)
         arr[:, :, :3] = rgb
 
-    return arr, mask
+    return arr, mask, weight
 
 
 def load_pair(original: Path, cleaned: Path, alpha_threshold: int, guidance_params: GuidanceParams) -> Tuple[np.ndarray, np.ndarray]:
@@ -597,6 +612,8 @@ class PatchDataset(Dataset):
         augment: bool,
         cache_size: int = 8,
         boundary_patch_ratio: float = 0.0,
+        boundary_loss_weight: float = 1.0,
+        boundary_loss_radius: int = 3,
     ) -> None:
         self.pairs = pairs
         self.alpha_threshold = alpha_threshold
@@ -608,7 +625,10 @@ class PatchDataset(Dataset):
         self.augment = augment
         self.cache_size = max(1, cache_size)
         self.boundary_patch_ratio = boundary_patch_ratio
-        self._cache: "OrderedDict[int, Tuple[np.ndarray, np.ndarray, Optional[Tuple[np.ndarray, np.ndarray]], Optional[Tuple[np.ndarray, np.ndarray]]]]" = OrderedDict()
+        self.boundary_loss_weight = boundary_loss_weight
+        self.boundary_loss_radius = boundary_loss_radius
+        self._dilate_kernel = np.ones((2 * boundary_loss_radius + 1, 2 * boundary_loss_radius + 1), np.uint8)
+        self._cache: "OrderedDict[int, Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[Tuple[np.ndarray, np.ndarray]], Optional[Tuple[np.ndarray, np.ndarray]]]]" = OrderedDict()
 
     def __len__(self) -> int:
         return self.patches_per_epoch
@@ -634,16 +654,22 @@ class PatchDataset(Dataset):
         bys, bxs = np.where(boundary)
         boundary_coords = (bys, bxs) if len(bxs) else None
 
-        self._cache[sample_index] = (arr, mask, positive_coords, boundary_coords)
+        self._cache[sample_index] = (arr, mask, boundary, positive_coords, boundary_coords)
         if len(self._cache) > self.cache_size:
             self._cache.popitem(last=False)
-        return arr, mask, positive_coords, boundary_coords
+        return arr, mask, boundary, positive_coords, boundary_coords
+
+    def _weight_crop(self, boundary_crop: Optional[np.ndarray]) -> np.ndarray:
+        if boundary_crop is None or self.boundary_loss_weight == 1.0:
+            return np.ones(boundary_crop.shape if boundary_crop is not None else (self.patch_size, self.patch_size), dtype=np.float32)
+        dilated = cv2.dilate(boundary_crop.astype(np.uint8), self._dilate_kernel) > 0
+        return np.where(dilated, self.boundary_loss_weight, 1.0).astype(np.float32)
 
     def __getitem__(self, index: int):
         ps = self.patch_size
         for _ in range(40):
             sample_index = random.randrange(len(self.pairs))
-            arr, mask, coords, boundary_coords = self._get(sample_index)
+            arr, mask, boundary, coords, boundary_coords = self._get(sample_index)
             h, w = mask.shape
             want_positive = random.random() < self.positive_patch_ratio
 
@@ -661,29 +687,33 @@ class PatchDataset(Dataset):
 
             y0 = max(0, min(y0, max(0, h - ps)))
             x0 = max(0, min(x0, max(0, w - ps)))
-            arr_crop, mask_crop = crop_with_padding(arr, mask, x0, y0, ps)
+            arr_crop, mask_crop, boundary_crop = crop_with_padding(arr, mask, x0, y0, ps, boundary)
 
             if want_positive and int(mask_crop.sum()) < self.min_positive_pixels:
                 continue
 
+            weight_crop = self._weight_crop(boundary_crop)
             if self.augment:
-                arr_crop, mask_crop = augment_patch(arr_crop, mask_crop)
+                arr_crop, mask_crop, weight_crop = augment_patch(arr_crop, mask_crop, weight_crop)
 
             image = torch.from_numpy(arr_crop.transpose(2, 0, 1).astype(np.float32))
             target = torch.from_numpy(mask_crop.astype(np.float32)[None, :, :])
-            return image, target
+            weight = torch.from_numpy(weight_crop[None, :, :])
+            return image, target, weight
 
         sample_index = random.randrange(len(self.pairs))
-        arr, mask, _, _ = self._get(sample_index)
+        arr, mask, boundary, _, _ = self._get(sample_index)
         h, w = mask.shape
         y0 = random.randint(0, max(0, h - ps))
         x0 = random.randint(0, max(0, w - ps))
-        arr_crop, mask_crop = crop_with_padding(arr, mask, x0, y0, ps)
+        arr_crop, mask_crop, boundary_crop = crop_with_padding(arr, mask, x0, y0, ps, boundary)
+        weight_crop = self._weight_crop(boundary_crop)
         if self.augment:
-            arr_crop, mask_crop = augment_patch(arr_crop, mask_crop)
+            arr_crop, mask_crop, weight_crop = augment_patch(arr_crop, mask_crop, weight_crop)
         image = torch.from_numpy(arr_crop.transpose(2, 0, 1).astype(np.float32))
         target = torch.from_numpy(mask_crop.astype(np.float32)[None, :, :])
-        return image, target
+        weight = torch.from_numpy(weight_crop[None, :, :])
+        return image, target, weight
 
 
 def save_checkpoint(path: Path, model: nn.Module, config: dict, args: argparse.Namespace) -> None:
@@ -742,6 +772,8 @@ def train_command(args: argparse.Namespace) -> None:
         augment=not args.no_augment,
         cache_size=args.cache_size,
         boundary_patch_ratio=args.boundary_patch_ratio,
+        boundary_loss_weight=args.boundary_loss_weight,
+        boundary_loss_radius=args.boundary_loss_radius,
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, pin_memory=(device.type == "cuda"), drop_last=True)
 
@@ -758,6 +790,8 @@ def train_command(args: argparse.Namespace) -> None:
             augment=False,
             cache_size=args.cache_size,
             boundary_patch_ratio=args.boundary_patch_ratio,
+            boundary_loss_weight=args.boundary_loss_weight,
+            boundary_loss_radius=args.boundary_loss_radius,
         )
         val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
 
@@ -793,6 +827,8 @@ def train_command(args: argparse.Namespace) -> None:
                 # concurrently. 2 is enough for a cheap diagnostic pass.
                 cache_size=2,
                 boundary_patch_ratio=args.boundary_patch_ratio,
+                boundary_loss_weight=args.boundary_loss_weight,
+                boundary_loss_radius=args.boundary_loss_radius,
             )
             variant_val_loaders[variant] = DataLoader(
                 v_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
@@ -838,14 +874,15 @@ def train_command(args: argparse.Namespace) -> None:
         seen = 0
         t_epoch = time.time()
 
-        for step, (images, masks) in enumerate(loader, start=1):
+        for step, (images, masks, weights) in enumerate(loader, start=1):
             images = images.to(device, non_blocking=True)
             masks = masks.to(device, non_blocking=True)
+            weights = weights.to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
 
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and args.amp)):
                 logits = model(images)
-                loss = criterion(logits, masks)
+                loss = criterion(logits, masks, weights)
 
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -873,11 +910,12 @@ def train_command(args: argparse.Namespace) -> None:
             val_running = 0.0
             val_seen = 0
             with torch.no_grad():
-                for images, masks in val_loader:
+                for images, masks, weights in val_loader:
                     images = images.to(device, non_blocking=True)
                     masks = masks.to(device, non_blocking=True)
+                    weights = weights.to(device, non_blocking=True)
                     logits = model(images)
-                    val_running += float(criterion(logits, masks).item())
+                    val_running += float(criterion(logits, masks, weights).item())
                     val_seen += 1
             tracked_loss = val_running / max(1, val_seen)
             log(f"epoch {epoch}/{args.epochs} val_loss={tracked_loss:.5f}")
@@ -887,11 +925,12 @@ def train_command(args: argparse.Namespace) -> None:
                 with torch.no_grad():
                     for variant, v_loader in variant_val_loaders.items():
                         v_running, v_seen = 0.0, 0
-                        for images, masks in v_loader:
+                        for images, masks, weights in v_loader:
                             images = images.to(device, non_blocking=True)
                             masks = masks.to(device, non_blocking=True)
+                            weights = weights.to(device, non_blocking=True)
                             logits = model(images)
-                            v_running += float(criterion(logits, masks).item())
+                            v_running += float(criterion(logits, masks, weights).item())
                             v_seen += 1
                         parts.append(f"{variant}={v_running / max(1, v_seen):.5f}")
                 log(f"epoch {epoch}/{args.epochs} val_loss_by_variant: " + ", ".join(parts))
@@ -1301,6 +1340,19 @@ def build_parser() -> argparse.ArgumentParser:
         "'clauds' bubble-edge imprecision; 0.0 (default) is inert -- a pure "
         "dataset-composition training run should keep this at 0.0 so its effect "
         "can be attributed separately from a later run with it enabled.",
+    )
+    p_train.add_argument(
+        "--boundary-loss-weight", type=float, default=1.0,
+        help="Loss weight multiplier for pixels within --boundary-loss-radius of a mask "
+        "boundary (curved/thin outline), vs. 1.0 for flat/interior pixels. 1.0 (default) "
+        "is an exact no-op -- same DiceBCELoss as before this flag existed. Targets the "
+        "'clauds' bubble-edge imprecision by making the loss itself curvature-aware, as "
+        "opposed to --boundary-patch-ratio's sampling-frequency approach.",
+    )
+    p_train.add_argument(
+        "--boundary-loss-radius", type=int, default=3,
+        help="Pixel radius the mask-boundary band is dilated by before applying "
+        "--boundary-loss-weight. Only relevant when --boundary-loss-weight != 1.0.",
     )
     p_train.add_argument("--min-positive-pixels", type=int, default=256)
     p_train.add_argument("--threshold", type=float, default=0.50)
