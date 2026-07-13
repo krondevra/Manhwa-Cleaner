@@ -758,18 +758,41 @@ views) independent of whether the core scale-matching idea is sound. **Not teste
 the dataset resize (e.g. proportionally, to preserve the original local-crop/page-width ratio)
 as its own properly isolated follow-up, not bundled with the scale-match change again.
 
-**Recommendation: keep `10.0-baseline` as the production checkpoint.** Both `16.0` attempts are
-tracked in git for reference only (the final, non-buggy checkpoint at `data/models/16.0.pt`/`.json`
-— the jitter-bug version was not kept, its finding is fully captured in this writeup and the code
-fix). The core scale-mismatch diagnosis (2481px training vs ~700px production, directly measured,
-not assumed) remains plausible and distinct from anything tried before — this session's failure to
-realize the benefit is attributable to two identified, specific implementation issues (the
-zoom-out padding bug, and the un-rescaled patch-size confound), not necessarily to the underlying
-hypothesis being wrong. Unlike `13.0`'s mechanism (a genuine flaw in the *idea* as implemented) or
-`15.0`'s severe multi-mechanism convergence (suggesting a structural ceiling), this one is more
-honestly characterized as **inconclusive-on-the-idea, conclusive-on-two-implementation-bugs** —
-worth a properly isolated retry (fixed jitter, patch-size scaled to match) before ruling the scale-
-mismatch hypothesis out entirely.
+**Update — a third attempt (`17.0`) tested the patch-size confound directly and also failed,
+in the opposite direction, closing out this experiment for the session.** `--patch-size` scaled
+proportionally from 512 to 144 (matching the 690px page width, preserving the original
+~21%-of-page-width local-crop ratio) — same scaled dataset, no scale-jitter, otherwise identical
+recipe. Clean 10-epoch run, 6.3min (dramatically faster — patches are ~13x fewer pixels). Best at
+epoch 5, val_loss=0.17716, healthy-looking curve, no crashes.
+
+**Result: severe regression, opposite direction from `16.0`'s unscaled-patch attempt.**
+Two-directional measurement across the same 18-coordinate spot-check: over-deletion exploded from
+10.08% to **77.25%** aggregate (individual clauds crops as high as 69-73%), while under-deletion
+stayed near zero (0.07%) — a clean, uniform collapse toward deleting almost everything, the polar
+opposite failure mode from `16.0`'s "keep almost everything" collapse. Not a subtle or ambiguous
+result — confirmed consistently across all 18 coordinates, not just the 3 dedicated crops.
+
+**So both tested patch-size extremes fail, in opposite directions**: 512px (unscaled, patches
+cover ~74% of the resized page) collapses toward under-deletion; 144px (proportionally scaled,
+patches cover ~21%) collapses toward over-deletion just as severely. This rules out "scale
+patch-size proportionally" as a simple fix, and is itself informative: patch-size interacts with
+this resized dataset in a way that isn't captured by either naive choice tested. A plausible
+uninvestigated factor: `--positive-patch-ratio`/`--boundary-patch-ratio`/`--min-positive-pixels`
+were all left at their `10.0-baseline` defaults, un-scaled for the new patch geometry — at 144px,
+`min_positive_pixels=256` is ~1.2% of the patch (a much higher bar relative to patch area than at
+512px), which could itself distort what patches get accepted during sampling in ways that weren't
+examined here.
+
+**Recommendation: keep `10.0-baseline` as the production checkpoint.** All three `16.0`/`17.0`
+attempts are documented; only the two non-buggy checkpoints are kept in git for reference
+(`16.0.pt`/`.json`, `17.0.pt`/`.json` — the jitter-bug version was never kept). The core
+scale-mismatch diagnosis (2481px training vs ~700px production, directly measured, not assumed)
+is not disproven by this session's three attempts, but the "obvious" fixes (naive jitter, either
+patch-size extreme) have now all failed with identified, non-overlapping mechanisms. **Do not
+guess at a fourth patch-size value next time** — if this is revisited, it needs a properly
+designed approach (e.g. sweep several patch sizes with adequate held-out evaluation before
+committing to a single full run, or investigate the `min_positive_pixels`/sampling-ratio
+interaction flagged above first) rather than another single-shot attempt at a middle value.
 
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
