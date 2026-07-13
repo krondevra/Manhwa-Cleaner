@@ -446,7 +446,7 @@ class DoubleConv(nn.Module):
 
 
 class SmallUNet(nn.Module):
-    def __init__(self, in_channels: int = 7, base: int = 24) -> None:
+    def __init__(self, in_channels: int = 7, base: int = 24, sdt_head: bool = False) -> None:
         super().__init__()
         self.down1 = DoubleConv(in_channels, base)
         self.down2 = DoubleConv(base, base * 2)
@@ -469,8 +469,14 @@ class SmallUNet(nn.Module):
         self.conv1 = DoubleConv(base * 2, base)
 
         self.out = nn.Conv2d(base, 1, 1)
+        # Auxiliary signed-distance-transform regression head, gated on
+        # construction (not just unused-but-present) so a disabled head adds
+        # zero params/state_dict keys and old checkpoints load unchanged.
+        # Branches off the same full-resolution `u1` feature map already
+        # feeding `self.out` -- encoder/decoder/skip structure untouched.
+        self.out_sdt = nn.Conv2d(base, 1, 1) if sdt_head else None
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor):
         c1 = self.down1(x)
         c2 = self.down2(self.pool(c1))
         c3 = self.down3(self.pool(c2))
@@ -493,7 +499,9 @@ class SmallUNet(nn.Module):
         u1 = self._resize_like(u1, c1)
         u1 = self.conv1(torch.cat([u1, c1], dim=1))
 
-        return self.out(u1)
+        logits = self.out(u1)
+        sdt = self.out_sdt(u1) if self.out_sdt is not None else None
+        return logits, sdt
 
     @staticmethod
     def _resize_like(x: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
@@ -549,12 +557,15 @@ def crop_with_padding(
 
 def augment_patch(
     arr: np.ndarray, mask: np.ndarray, weight: Optional[np.ndarray] = None,
-) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+    sdt: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray], Optional[np.ndarray]]:
     if random.random() < 0.5:
         arr = np.ascontiguousarray(arr[:, ::-1])
         mask = np.ascontiguousarray(mask[:, ::-1])
         if weight is not None:
             weight = np.ascontiguousarray(weight[:, ::-1])
+        if sdt is not None:
+            sdt = np.ascontiguousarray(sdt[:, ::-1])
 
     if random.random() < 0.6:
         arr = arr.copy()
@@ -564,7 +575,7 @@ def augment_patch(
         rgb = np.clip((rgb - 0.5) * contrast + 0.5 + brightness, 0.0, 1.0)
         arr[:, :, :3] = rgb
 
-    return arr, mask, weight
+    return arr, mask, weight, sdt
 
 
 def load_pair(original: Path, cleaned: Path, alpha_threshold: int, guidance_params: GuidanceParams) -> Tuple[np.ndarray, np.ndarray]:
@@ -614,6 +625,8 @@ class PatchDataset(Dataset):
         boundary_patch_ratio: float = 0.0,
         boundary_loss_weight: float = 1.0,
         boundary_loss_radius: int = 3,
+        compute_sdt: bool = False,
+        sdt_clamp_radius: int = 8,
     ) -> None:
         self.pairs = pairs
         self.alpha_threshold = alpha_threshold
@@ -628,6 +641,8 @@ class PatchDataset(Dataset):
         self.boundary_loss_weight = boundary_loss_weight
         self.boundary_loss_radius = boundary_loss_radius
         self._dilate_kernel = np.ones((2 * boundary_loss_radius + 1, 2 * boundary_loss_radius + 1), np.uint8)
+        self.compute_sdt = compute_sdt
+        self.sdt_clamp_radius = sdt_clamp_radius
         self._cache: "OrderedDict[int, Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[Tuple[np.ndarray, np.ndarray]], Optional[Tuple[np.ndarray, np.ndarray]]]]" = OrderedDict()
 
     def __len__(self) -> int:
@@ -665,6 +680,22 @@ class PatchDataset(Dataset):
         dilated = cv2.dilate(boundary_crop.astype(np.uint8), self._dilate_kernel) > 0
         return np.where(dilated, self.boundary_loss_weight, 1.0).astype(np.float32)
 
+    def _sdt_crop(self, mask_crop: np.ndarray) -> np.ndarray:
+        """Signed distance transform target for the auxiliary SDT head:
+        positive on the keep side, negative on the delete side, ~0 at the
+        boundary, clamped to +-sdt_clamp_radius and normalized to [-1, 1].
+        Computed per-crop (cheap at patch_size) rather than per-full-image.
+        When disabled, returns a zero-cost placeholder with no RNG calls, so
+        __getitem__'s patch-selection sequence is unaffected either way."""
+        if not self.compute_sdt:
+            return np.zeros(mask_crop.shape, dtype=np.float32)
+        mask_u8 = mask_crop.astype(np.uint8)  # 1 = delete, 0 = keep
+        dist_from_delete = cv2.distanceTransform(mask_u8, cv2.DIST_L2, 5)
+        dist_from_keep = cv2.distanceTransform(1 - mask_u8, cv2.DIST_L2, 5)
+        sdt = dist_from_keep - dist_from_delete
+        r = self.sdt_clamp_radius
+        return (np.clip(sdt, -r, r) / r).astype(np.float32)
+
     def __getitem__(self, index: int):
         ps = self.patch_size
         for _ in range(40):
@@ -693,13 +724,15 @@ class PatchDataset(Dataset):
                 continue
 
             weight_crop = self._weight_crop(boundary_crop)
+            sdt_crop = self._sdt_crop(mask_crop)
             if self.augment:
-                arr_crop, mask_crop, weight_crop = augment_patch(arr_crop, mask_crop, weight_crop)
+                arr_crop, mask_crop, weight_crop, sdt_crop = augment_patch(arr_crop, mask_crop, weight_crop, sdt_crop)
 
             image = torch.from_numpy(arr_crop.transpose(2, 0, 1).astype(np.float32))
             target = torch.from_numpy(mask_crop.astype(np.float32)[None, :, :])
             weight = torch.from_numpy(weight_crop[None, :, :])
-            return image, target, weight
+            sdt = torch.from_numpy(sdt_crop[None, :, :])
+            return image, target, weight, sdt
 
         sample_index = random.randrange(len(self.pairs))
         arr, mask, boundary, _, _ = self._get(sample_index)
@@ -708,12 +741,14 @@ class PatchDataset(Dataset):
         x0 = random.randint(0, max(0, w - ps))
         arr_crop, mask_crop, boundary_crop = crop_with_padding(arr, mask, x0, y0, ps, boundary)
         weight_crop = self._weight_crop(boundary_crop)
+        sdt_crop = self._sdt_crop(mask_crop)
         if self.augment:
-            arr_crop, mask_crop, weight_crop = augment_patch(arr_crop, mask_crop, weight_crop)
+            arr_crop, mask_crop, weight_crop, sdt_crop = augment_patch(arr_crop, mask_crop, weight_crop, sdt_crop)
         image = torch.from_numpy(arr_crop.transpose(2, 0, 1).astype(np.float32))
         target = torch.from_numpy(mask_crop.astype(np.float32)[None, :, :])
         weight = torch.from_numpy(weight_crop[None, :, :])
-        return image, target, weight
+        sdt = torch.from_numpy(sdt_crop[None, :, :])
+        return image, target, weight, sdt
 
 
 def save_checkpoint(path: Path, model: nn.Module, config: dict, args: argparse.Namespace) -> None:
@@ -726,7 +761,11 @@ def save_checkpoint(path: Path, model: nn.Module, config: dict, args: argparse.N
 def load_model(model_path: Path, device: torch.device):
     checkpoint = torch.load(model_path, map_location=device, weights_only=False)
     config = checkpoint["config"]
-    model = SmallUNet(in_channels=int(config["in_channels"]), base=int(config["base_channels"])).to(device)
+    model = SmallUNet(
+        in_channels=int(config["in_channels"]),
+        base=int(config["base_channels"]),
+        sdt_head=bool(config.get("sdt_head", False)),
+    ).to(device)
     model.load_state_dict(checkpoint["state_dict"])
     model.eval()
     return model, config
@@ -761,6 +800,8 @@ def train_command(args: argparse.Namespace) -> None:
     log(f"training pixels: delete={total_delete:,}, total={total_pixels:,}, delete_ratio={delete_ratio:.4f}")
     log(f"pos_weight={pos_weight:.3f}")
 
+    compute_sdt = args.sdt_loss_weight > 0.0
+
     dataset = PatchDataset(
         pairs=pairs,
         alpha_threshold=args.alpha_threshold,
@@ -774,6 +815,8 @@ def train_command(args: argparse.Namespace) -> None:
         boundary_patch_ratio=args.boundary_patch_ratio,
         boundary_loss_weight=args.boundary_loss_weight,
         boundary_loss_radius=args.boundary_loss_radius,
+        compute_sdt=compute_sdt,
+        sdt_clamp_radius=args.sdt_clamp_radius,
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, pin_memory=(device.type == "cuda"), drop_last=True)
 
@@ -792,6 +835,8 @@ def train_command(args: argparse.Namespace) -> None:
             boundary_patch_ratio=args.boundary_patch_ratio,
             boundary_loss_weight=args.boundary_loss_weight,
             boundary_loss_radius=args.boundary_loss_radius,
+            compute_sdt=compute_sdt,
+            sdt_clamp_radius=args.sdt_clamp_radius,
         )
         val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
 
@@ -829,13 +874,15 @@ def train_command(args: argparse.Namespace) -> None:
                 boundary_patch_ratio=args.boundary_patch_ratio,
                 boundary_loss_weight=args.boundary_loss_weight,
                 boundary_loss_radius=args.boundary_loss_radius,
+                compute_sdt=compute_sdt,
+                sdt_clamp_radius=args.sdt_clamp_radius,
             )
             variant_val_loaders[variant] = DataLoader(
                 v_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
         log(f"per-variant val breakdown enabled for: {sorted(variant_val_loaders)}")
 
     in_channels = load_pair(*pairs[0], args.alpha_threshold, guidance_params)[0].shape[2]
-    model = SmallUNet(in_channels=in_channels, base=args.base_channels).to(device)
+    model = SmallUNet(in_channels=in_channels, base=args.base_channels, sdt_head=compute_sdt).to(device)
     if args.resume and expand_path(args.resume).exists():
         log(f"loading checkpoint for resume: {args.resume}")
         checkpoint = torch.load(expand_path(args.resume), map_location=device, weights_only=False)
@@ -862,6 +909,8 @@ def train_command(args: argparse.Namespace) -> None:
         "alpha_threshold": args.alpha_threshold,
         "threshold_value": args.threshold_value,
         "morph_radius": args.morph_radius,
+        "sdt_head": compute_sdt,
+        "sdt_clamp_radius": args.sdt_clamp_radius,
     }
 
     best_loss = float("inf")
@@ -871,18 +920,24 @@ def train_command(args: argparse.Namespace) -> None:
     for epoch in range(1, args.epochs + 1):
         model.train()
         running = 0.0
+        running_sdt = 0.0
         seen = 0
         t_epoch = time.time()
 
-        for step, (images, masks, weights) in enumerate(loader, start=1):
+        for step, (images, masks, weights, sdts) in enumerate(loader, start=1):
             images = images.to(device, non_blocking=True)
             masks = masks.to(device, non_blocking=True)
             weights = weights.to(device, non_blocking=True)
+            sdts = sdts.to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
 
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and args.amp)):
-                logits = model(images)
+                logits, sdt_pred = model(images)
                 loss = criterion(logits, masks, weights)
+                sdt_term = torch.zeros((), device=loss.device)
+                if args.sdt_loss_weight > 0.0:
+                    sdt_term = F.smooth_l1_loss(sdt_pred, sdts, beta=1.0)
+                    loss = loss + args.sdt_loss_weight * sdt_term
 
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -890,12 +945,14 @@ def train_command(args: argparse.Namespace) -> None:
             scheduler.step()
 
             running += float(loss.item())
+            running_sdt += float(sdt_term.item())
             seen += 1
 
             if step % args.log_every == 0 or step == args.steps_per_epoch:
                 avg = running / max(1, seen)
                 elapsed = time.time() - t_epoch
-                log(f"epoch {epoch}/{args.epochs}, step {step}/{args.steps_per_epoch}, loss={avg:.5f}, "
+                sdt_note = f", sdt_loss={running_sdt / max(1, seen):.5f}" if args.sdt_loss_weight > 0.0 else ""
+                log(f"epoch {epoch}/{args.epochs}, step {step}/{args.steps_per_epoch}, loss={avg:.5f}{sdt_note}, "
                     f"lr={scheduler.get_last_lr()[0]:.2e}, elapsed={elapsed:.1f}s")
 
             if step >= args.steps_per_epoch:
@@ -910,11 +967,11 @@ def train_command(args: argparse.Namespace) -> None:
             val_running = 0.0
             val_seen = 0
             with torch.no_grad():
-                for images, masks, weights in val_loader:
+                for images, masks, weights, _sdts in val_loader:
                     images = images.to(device, non_blocking=True)
                     masks = masks.to(device, non_blocking=True)
                     weights = weights.to(device, non_blocking=True)
-                    logits = model(images)
+                    logits, _sdt_pred = model(images)
                     val_running += float(criterion(logits, masks, weights).item())
                     val_seen += 1
             tracked_loss = val_running / max(1, val_seen)
@@ -925,11 +982,11 @@ def train_command(args: argparse.Namespace) -> None:
                 with torch.no_grad():
                     for variant, v_loader in variant_val_loaders.items():
                         v_running, v_seen = 0.0, 0
-                        for images, masks, weights in v_loader:
+                        for images, masks, weights, _sdts in v_loader:
                             images = images.to(device, non_blocking=True)
                             masks = masks.to(device, non_blocking=True)
                             weights = weights.to(device, non_blocking=True)
-                            logits = model(images)
+                            logits, _sdt_pred = model(images)
                             v_running += float(criterion(logits, masks, weights).item())
                             v_seen += 1
                         parts.append(f"{variant}={v_running / max(1, v_seen):.5f}")
@@ -974,11 +1031,19 @@ def pad_image_for_tiling(arr: np.ndarray, tile_size: int, stride: int):
 
 
 @torch.no_grad()
-def predict_delete_mask(rgb: np.ndarray, model: nn.Module, device: torch.device, guidance_params: GuidanceParams, tile_size: int, overlap: int, threshold: float, amp: bool):
+def predict_delete_mask(
+    rgb: np.ndarray, model: nn.Module, device: torch.device, guidance_params: GuidanceParams,
+    tile_size: int, overlap: int, threshold: float, amp: bool,
+    sdt_fusion: bool = False, sdt_fusion_band_radius: int = 4, sdt_clamp_radius: float = 8.0,
+):
     full = build_input_tensor(rgb, guidance_params)
 
     if overlap < 0 or overlap >= tile_size:
         raise ValueError("--overlap must be >= 0 and smaller than --tile-size")
+
+    has_sdt_head = sdt_fusion and getattr(model, "out_sdt", None) is not None
+    if sdt_fusion and not has_sdt_head:
+        log("--sdt-fusion requested but this checkpoint has no SDT head -- ignoring.")
 
     stride = tile_size - overlap
     padded, (oh, ow) = pad_image_for_tiling(full, tile_size, stride)
@@ -986,6 +1051,7 @@ def predict_delete_mask(rgb: np.ndarray, model: nn.Module, device: torch.device,
 
     prob_sum = np.zeros((ph, pw), dtype=np.float32)
     weight_sum = np.zeros((ph, pw), dtype=np.float32)
+    sdt_sum = np.zeros((ph, pw), dtype=np.float32) if has_sdt_head else None
     window = make_weight_window(tile_size)
 
     y_positions = list(range(0, ph - tile_size + 1, stride))
@@ -1003,11 +1069,15 @@ def predict_delete_mask(rgb: np.ndarray, model: nn.Module, device: torch.device,
             image = torch.from_numpy(tile.transpose(2, 0, 1).astype(np.float32)).unsqueeze(0).to(device)
 
             with torch.amp.autocast("cuda", enabled=(device.type == "cuda" and amp)):
-                logits = model(image)
+                logits, sdt_pred = model(image)
                 probs = torch.sigmoid(logits)[0, 0].float().cpu().numpy()
+                if has_sdt_head:
+                    sdt_tile = sdt_pred[0, 0].float().cpu().numpy()
 
             prob_sum[y:y + tile_size, x:x + tile_size] += probs * window
             weight_sum[y:y + tile_size, x:x + tile_size] += window
+            if has_sdt_head:
+                sdt_sum[y:y + tile_size, x:x + tile_size] += sdt_tile * window
 
             if tile_index % 20 == 0 or tile_index == total_tiles:
                 percent = 100.0 * tile_index / max(1, total_tiles)
@@ -1016,7 +1086,23 @@ def predict_delete_mask(rgb: np.ndarray, model: nn.Module, device: torch.device,
 
     probability = prob_sum / np.maximum(weight_sum, 1e-6)
     probability = probability[:oh, :ow]
-    return probability >= threshold
+    delete_mask = probability >= threshold
+
+    if has_sdt_head:
+        # Conservative fusion: the SDT prediction can only ever flip pixels
+        # already within sdt_fusion_band_radius of the primary classifier's
+        # OWN predicted boundary -- it can never introduce a new far-from-
+        # boundary region, bounding the blast radius of a noisy aux head.
+        sdt_map = sdt_sum / np.maximum(weight_sum, 1e-6)
+        sdt_map = sdt_map[:oh, :ow]
+        sdt_px = np.clip(sdt_map, -1.0, 1.0) * sdt_clamp_radius
+        boundary = cv2.morphologyEx(delete_mask.astype(np.uint8), cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8)) > 0
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (sdt_fusion_band_radius * 2 + 1, sdt_fusion_band_radius * 2 + 1))
+        band = cv2.dilate(boundary.astype(np.uint8), k) > 0
+        delete_mask = delete_mask.copy()
+        delete_mask[band] = sdt_px[band] < 0
+
+    return delete_mask
 
 
 def postprocess_delete_mask(delete_mask: np.ndarray, close_radius: int, open_radius: int) -> np.ndarray:
@@ -1145,6 +1231,9 @@ def process_command(args: argparse.Namespace) -> None:
         overlap=args.overlap,
         threshold=threshold,
         amp=args.amp,
+        sdt_fusion=args.sdt_fusion,
+        sdt_fusion_band_radius=args.sdt_fusion_band_radius,
+        sdt_clamp_radius=float(config.get("sdt_clamp_radius", 8.0)),
     )
 
     if args.postprocess:
@@ -1230,6 +1319,9 @@ def process_folder_command(args: argparse.Namespace) -> None:
             overlap=args.overlap,
             threshold=threshold,
             amp=args.amp,
+            sdt_fusion=args.sdt_fusion,
+            sdt_fusion_band_radius=args.sdt_fusion_band_radius,
+            sdt_clamp_radius=float(config.get("sdt_clamp_radius", 8.0)),
         )
 
         if args.postprocess:
@@ -1285,6 +1377,21 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--border-band", type=int, default=3, help="Max px from kept content to protect")
     parser.add_argument("--border-darkness", type=int, default=40, help="Grayscale <= this counts as 'near-black'")
+    parser.add_argument(
+        "--sdt-fusion", action="store_true",
+        help="If the loaded checkpoint has an auxiliary SDT head (trained with "
+        "--sdt-loss-weight > 0), use its zero-crossing sign to refine the "
+        "primary classifier's decision within a narrow band around its own "
+        "predicted boundary. No-op (with a warning) on checkpoints without an "
+        "SDT head. Off by default -- evaluate as its own variable, separate "
+        "from the base SDT-trained checkpoint.",
+    )
+    parser.add_argument(
+        "--sdt-fusion-band-radius", type=int, default=4,
+        help="Pixel radius around the primary classifier's own predicted "
+        "boundary that --sdt-fusion is allowed to override. Only relevant "
+        "when --sdt-fusion is set.",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1353,6 +1460,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--boundary-loss-radius", type=int, default=3,
         help="Pixel radius the mask-boundary band is dilated by before applying "
         "--boundary-loss-weight. Only relevant when --boundary-loss-weight != 1.0.",
+    )
+    p_train.add_argument(
+        "--sdt-loss-weight", type=float, default=0.0,
+        help="Weight for an auxiliary signed-distance-transform regression loss "
+        "(smooth-L1 vs. a per-pixel distance-to-boundary target), added to the "
+        "existing DiceBCELoss. NOTE the neutral/off value is 0.0, not 1.0 -- this "
+        "is an ADDITIVE term, unlike --boundary-loss-weight's multiplier. 0.0 "
+        "(default) is an exact no-op: no SDT head is even constructed, so the "
+        "model architecture and DiceBCELoss are byte-identical to before this "
+        "flag existed. Targets 'clauds' bubble-edge imprecision by giving the "
+        "model a training signal with a notion of smooth boundary geometry, "
+        "which independent per-pixel BCE/Dice classification does not have.",
+    )
+    p_train.add_argument(
+        "--sdt-clamp-radius", type=int, default=8,
+        help="Pixel radius the signed distance transform target is clamped to "
+        "before normalizing to [-1, 1]. Only relevant when --sdt-loss-weight > 0.",
     )
     p_train.add_argument("--min-positive-pixels", type=int, default=256)
     p_train.add_argument("--threshold", type=float, default=0.50)
