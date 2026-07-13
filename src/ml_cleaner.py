@@ -575,7 +575,7 @@ def scale_jitter_patch(
     version padded the shrunk patch with a synthetic "keep" border to fill
     the gap, which taught the model a real, high-frequency lie (ambiguous/
     edge regions default to keep) and collapsed it toward drastically
-    under-deleting real background (measured: 87% of true background left
+    under-deleting real background (measured: roughly 87 percent of true background left
     undeleted in one full evaluation, see docs/ml_strategy_history.md
     "model 16.0"). Only zooming in avoids needing to invent any pixels."""
     ps = mask.shape[0]
@@ -1546,7 +1546,7 @@ def build_parser() -> argparse.ArgumentParser:
         "shrunk patch, and an earlier version's synthetic 'keep' padding "
         "border taught the model a real, high-frequency lie that collapsed "
         "it toward drastically under-deleting real background (measured: "
-        "87% of true background left undeleted in one full evaluation, see "
+        "roughly 87 percent of true background left undeleted in one full evaluation, see "
         "docs/ml_strategy_history.md 'model 16.0').",
     )
     p_train.add_argument("--min-positive-pixels", type=int, default=256)
