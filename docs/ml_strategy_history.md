@@ -684,6 +684,93 @@ adding per-instance random aspect ratio and outline-jitter to `make_bubbles.py`'
 instead of reusing ~8-10 static templates — evaluated in its own isolated run, no loss/architecture
 changes bundled in.
 
+### FAILED (informative, mechanism identified) — model 16.0, training/inference resolution mismatch
+2026-07-13, later same day: last session's plan for this slot assumed the clauds root cause was
+bubble-shape template poverty in `make_bubbles.py` (~8-10 fixed static templates). **That premise
+was checked directly this session and did not hold**: `framed_speechbubles_w` (the dominant active
+training variant) is built from real, hand-drawn Pepper & Carrot bubble shapes extracted via
+`process_speechbubbles.py` from the comic's own SVGs — `make_bubbles.py`'s templates aren't
+consumed by any variant currently in `data/dataset/` at all. Bubble-outline stroke width (2px)
+also already matches `panel_edge()`'s frame-marker width exactly, and training alpha channels are
+already hard binary (0.000% intermediate-alpha pixels, 8-page sample) — the "soft transition" and
+"marker inconsistency" hypotheses don't hold either.
+
+**New finding, verified directly**: Pepper & Carrot training pages are uniformly 2481×3503px
+(confirmed across 10 episodes). Every real chapter checked — evaluation chapters and the
+human-cleaned manual-reference chapters demonstrating perfect achievable quality — is consistently
+~690-720px wide. A ~3.6x scale mismatch, never addressed by any prior attempt. Since a CNN's
+convolutional kernels operate at a fixed absolute-pixel receptive field, training at 3.6x the
+linear scale of production input means every learned local curvature/boundary feature is
+calibrated to a systematically gentler, lower-curvature-per-pixel signal than real chapters
+present — a mechanistically distinct, well-motivated hypothesis, untested by any of the 5 prior
+training-mechanism-side attempts.
+
+**Implementation**: new `PepperNCarrotDataset/src/tools/scale_dataset_to_target_resolution.py`
+resizes the actively-trained variants to a 690px target width (RGB via LANCZOS, alpha via LANCZOS
++ `_binarize_alpha()` re-hardening) into a new `data/dataset_scaled/` sibling tier — validated
+clean (1953 pairs, 0 missing, 0 dimension mismatches, 0 soft-alpha pixels across a 130-page
+spot-check). Also deleted the long-unused `framed_speechbubles_black*/_gradient*/_context*` families
+from `data/dataset/` (excluded from training since `3.38.1`, zero effect on model behavior) — 106G
+→ 37G, pure disk hygiene.
+
+**First attempt — `16.0` with `--scale-jitter 0.2`**: added a training-time random per-patch
+zoom augmentation to guard against the 690px target being estimated from only 4 real chapters (a
+fair concern raised mid-session — not a robust sample of real-world webtoon export widths).
+**Result: catastrophic regression, mechanism identified.** The zoom-out branch padded a shrunk
+patch with a synthetic all-"keep" (white) border to fill the gap — teaching the model a real,
+high-frequency lie (roughly half of all scale-jittered patches had an artificial "definitely keep"
+border unrelated to real content) at high enough frequency to collapse the model's decision
+boundary. Measured via a **two-directional pixel-ground-truth check** (islands-cleaned output as
+ground truth for both true content AND true background, not just content as in prior sessions'
+methodology): over-deletion of real content actually improved slightly (10.08% → 7.67% aggregate
+across the 18-coordinate spot-check) — but **under-deletion of real background exploded from 0.00%
+to 87.39%**, a failure mode the content-only metric used for models 12.0-15.0 would have completely
+missed. This is now a permanent addition to this project's evaluation methodology: **always check
+both directions** (content wrongly deleted AND background wrongly kept), not just one.
+
+**Fix applied**: `scale_jitter_patch()` rewritten to only zoom in (crop, never pad) — zoom-out
+draws are skipped rather than inventing pixels. Fixed in `src/ml_cleaner.py`, `--scale-jitter`
+help text corrected to describe the new zoom-in-only behavior.
+
+**Second attempt — clean retrain, `--scale-jitter 0.0` (isolating the core scale-match hypothesis
+alone)**: bundling scale-jitter into the very first scale-match test violated this project's own
+"one variable per run" discipline (methodology lesson #1) — corrected by retraining with the
+augmentation fully off. Training was interrupted mid-epoch-8 by an external process kill (not OOM,
+memory was never under pressure) partway through this session's time budget; epoch 7's checkpoint
+(val_loss=0.088, the best of the run so far, healthy decreasing trend, tight per-variant spread)
+was evaluated as-is rather than restarting, given the time budget. **Result: still a regression,
+milder than the jitter-bug version but real and broad.** Two-directional measurement across the
+18-coordinate spot-check: over-deletion 10.08% → 17.98% (worse), under-deletion 0.00% → 14.38%
+(new problem, smaller than the buggy run's 87% but not zero). The 3 dedicated clauds crops showed
+a similar mixed-to-worse pattern once measured in both directions (previously only over-deletion
+had been checked, which showed an apparent improvement — see the methodology note above for why
+that was an incomplete picture).
+
+**A second bundled variable was identified, not yet tested**: `--patch-size` was left at 512
+throughout, unchanged from `10.0-baseline`. On the original 2481px-wide pages, a 512px patch
+covered ~21% of page width — a genuinely local crop. On the new ~690px pages, the same 512px patch
+covers ~74% of page width — training patches stopped being local boundary crops and became
+near-whole-page views. This plausibly changes what kind of training signal the model receives
+(far less diversity of relative position/context per patch, `positive_patch_ratio`/
+`boundary_patch_ratio` sampling logic designed around small local crops rather than whole-page
+views) independent of whether the core scale-matching idea is sound. **Not tested this session**
+(time budget) — if this hypothesis is revisited, `--patch-size` should be scaled down alongside
+the dataset resize (e.g. proportionally, to preserve the original local-crop/page-width ratio)
+as its own properly isolated follow-up, not bundled with the scale-match change again.
+
+**Recommendation: keep `10.0-baseline` as the production checkpoint.** Both `16.0` attempts are
+tracked in git for reference only (the final, non-buggy checkpoint at `data/models/16.0.pt`/`.json`
+— the jitter-bug version was not kept, its finding is fully captured in this writeup and the code
+fix). The core scale-mismatch diagnosis (2481px training vs ~700px production, directly measured,
+not assumed) remains plausible and distinct from anything tried before — this session's failure to
+realize the benefit is attributable to two identified, specific implementation issues (the
+zoom-out padding bug, and the un-rescaled patch-size confound), not necessarily to the underlying
+hypothesis being wrong. Unlike `13.0`'s mechanism (a genuine flaw in the *idea* as implemented) or
+`15.0`'s severe multi-mechanism convergence (suggesting a structural ceiling), this one is more
+honestly characterized as **inconclusive-on-the-idea, conclusive-on-two-implementation-bugs** —
+worth a properly isolated retry (fixed jitter, patch-size scaled to match) before ruling the scale-
+mismatch hypothesis out entirely.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
@@ -720,3 +807,12 @@ changes bundled in.
    a brightness/color shortcut); if islands reclaim measurably fixes it,
    it's a connectivity/flood-fill problem instead. Run both whenever
    diagnosing a new dark-content regression.
+8. **Pixel-ground-truth measurement must check BOTH directions: content
+   wrongly deleted AND background wrongly kept.** Model `16.0`'s
+   scale-jitter bug produced a checkpoint that looked like a genuine
+   improvement on a content-only metric (over-deletion actually dropped)
+   while catastrophically under-deleting real background (87% wrongly kept
+   white, completely invisible to that one-directional check). Every
+   pixel-ground-truth evaluation from here on should measure both
+   `red & gt_white` (content lost) and `white & gt_red` (background kept)
+   against the same islands-cleaned ground truth, not just one.
