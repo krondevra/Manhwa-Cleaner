@@ -504,6 +504,99 @@ for reference, not recommended for use. This is now the third training-side leve
 ruled out for clauds specifically (sampling, capacity, and now boundary-loss-weighting as
 naively implemented) — dataset composition remains the only thing that has helped.
 
+### MIXED (informative) — model 14.0, SFX white-outline hypothesis + colored-SFX variant
+2026-07-13: new hypothesis, untested until now: real manhwa SFX text typically has a white
+outline that becomes invisible on white page background — structurally identical to a
+speech-bubble's outline against its white interior. Theory: since the model shares weights
+across the whole image, SFX-white-on-white gives an ambiguous/weak training signal that could
+generalize into "thin light boundary near white background = uncertain, be conservative" —
+leaking into bubble-edge (clauds) precision via shared weights. Not confirmed going in — one
+hypothesis to test, single-variable isolation vs. `10.0-baseline`.
+
+**Scope-changing finding before training even started**: no previously-trained variant actually
+touched real-colored SFX at all. `framed_speechbubles_context_sfx` (the only generator output
+compositing real SFX text) has been excluded from `BASE_VARIANTS`/`OVERLAY_VARIANTS` since the
+v7.0/v9.0 brightness-shortcut regressions (built on the unsafe `make_context_mask()` foundation,
+never routed through `panel_edge()`), and even where generated, `_apply_white_plan()` flattens
+all SFX color to solid white. So testing this hypothesis required reviving a *properly-isolated*
+colored-SFX variant into active training, not just fixing dormant code — confirmed with the user
+before proceeding.
+
+**Data-generation changes (PepperNCarrotDataset)**:
+1. New `framed_speechbubles_sfx_w(+_cleaned)` variant, built on the `ui_w` precedent (safe
+   overlay onto the already-`panel_edge()`-hardened `framed_speechbubles_w` base), not on
+   `context_sfx`'s unsafe foundation. `make_sfx.py` (v1.25.0) now exports a per-(job,mode)
+   outline-ring sidecar mask; `_paste_sfx_colored()` deletes the outline-in-target only where
+   both the outline's own rendered color *and* the underlying page pixel are near-white
+   (`luma >= 235` both ends) — narrow and structurally scoped, not a flat brightness rule. Input
+   always keeps the full glyph; only the training target is simplified. Three-layer safety
+   verification (permanent `validate_dataset.py` diff-against-baseline invariant, one-off
+   connected-component leak audit, ep01 smoke test) all passed clean on the full 39-episode
+   regen — no flood-fill-leak reopened.
+2. `render_gradient()`'s outline color fixed to a hard per-pixel binary switch (black/white
+   opposite the local fill luma) so gradient SFX never has a soft/ambiguous outline-vs-fill
+   transition.
+
+Trained `14.0` with `10.0-baseline`'s exact recipe (`base_channels=24`, same hyperparameters)
+plus the new variant, nothing else changed. `--val-variants-breakdown` at epoch 10:
+`sfx_w=0.26111` (clearly the hardest/highest of all variants, as expected for a new complex
+one — next highest was `shapes_bw=0.22564`), `ui_w=0.15972` (mid-pack, not obviously elevated).
+No prior run recorded a per-variant `ui_w` number to diff against directly, so the
+shared-placement-math confound between `sfx_w` and `ui_w` (both go through
+`_plan_overlays`/`_plan_sfx_overlays`) can't be fully ruled in or out from this run alone — but
+`ui_w`'s absolute value gives no sign of it.
+
+**Result: mixed, not a confirmation.** Evaluated on the 3 established clauds crops, 3 white-bg
+crops, 2 new dedicated real-SFX-on-white crops (`.tmp/notes/sfx_regression_crops.md`, built
+specifically for this test since no existing crop set covers colored/gradient SFX), and a broad
+18-coordinate `compare_models_video.py --screenshots` spot-check, all against `10.0-baseline`
+with and without `--reclaim-islands`.
+
+- **Clauds crops (the actual target defect): no clear improvement on any of the 3.** Hypothesis
+  not confirmed by the crop set built specifically to track it.
+- **Dedicated SFX crops: no improvement either.** Crop B (red-to-black gradient SFX on white)
+  unchanged. Crop A (blue swoosh with glow-to-white blur) got *worse* — raw `14.0` shows a new
+  jagged/scalloped defect along a diagonal panel edge near the glow halo that isn't present in
+  `10.0-baseline`.
+- **White-bg crops: no difference on all 3**, including the closest prior analog (white
+  burst-SFX claw shape).
+- **Broad 18-coordinate spot check: 2 genuine improvements** (smaller bubble-corner intrusion at
+  one coordinate than baseline; a red bite into a white shape below a black-stroke SFX mark that
+  baseline had and `14.0` didn't), **1 mixed result** (better on one edge of a bubble, worse on
+  another), **and 2 new regressions not present in `10.0-baseline`**: at two separate
+  coordinates, raw `14.0` eats into legitimate white content (a snow/frost gradient background,
+  and a speech-bubble-shaped white region) near SFX-adjacent or soft-textured content, where
+  `10.0-baseline` stayed clean. Both new regressions are hidden by `--reclaim-islands`
+  postprocessing (consistent with the established pattern for every checkpoint's raw-model
+  gaps), so production-visible impact is smaller than the raw numbers suggest — but the same was
+  true of model 12.0/13.0's regressions, which this project's methodology treats as real
+  findings regardless. The remaining ~13 of 18 coordinates showed no meaningful difference. No
+  diffuse-fragmentation regression (the specific failure mode that flagged model 12.0) was seen
+  anywhere in this sweep.
+
+**Interpretation**: the new regressions cluster specifically near soft/glow/gradient content
+adjacent to SFX — the *opposite* direction from the original hypothesis (which predicted
+under-deletion/conservatism near SFX, not over-deletion of legitimate soft content elsewhere).
+Plausible mechanism: `sfx_w`'s much harder held-out loss (0.26111, well above every other
+variant) may be pulling shared decoder weights toward more aggressive deletion decisions in
+visually-similar soft/gradient contexts generally, not just at literal SFX-on-white pixels — a
+different shared-weights side-effect than the one hypothesized, but still a shared-weights
+effect. Item 3 from the original problem statement (SFX left with partial outline/residue,
+overly conservative) is also not clearly resolved by this run — the two dedicated SFX crops show
+no cleanup improvement.
+
+**Recommendation: keep `10.0-baseline` as the production checkpoint.** `14.0` is not a clear
+regression on the scale of model 12.0/13.0, but it is not the fix either — it trades a couple of
+small, narrow wins for a couple of small, narrow new defects, with the core clauds problem
+unchanged. Dataset composition (`10.0-baseline`'s original white-bg-only simplification) remains
+the only lever that has produced an unambiguous improvement across four attempts (sampling,
+capacity, boundary-loss weighting, now SFX exposure). Worth considering if revisited: the
+shared-weights mechanism (in either direction) keeps showing up whenever a new, harder variant
+is added — an architectural separation (e.g. a variant-conditioned decoder head, or excluding
+distant regions from a single shared gradient update) might be a more direct way to test the
+"shared weights leak conservatism/aggression across dissimilar regions" theory than adding more
+training data ever can.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
