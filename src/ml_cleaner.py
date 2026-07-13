@@ -555,6 +555,55 @@ def crop_with_padding(
     return out_arr, out_mask, out_boundary
 
 
+def scale_jitter_patch(
+    arr: np.ndarray, mask: np.ndarray, weight: np.ndarray, sdt: np.ndarray,
+    zoom_range: Tuple[float, float],
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Randomly zoom a patch in/out (linear scale jitter) before the other
+    augmentations, then crop/pad back to the original patch size. Guards
+    against a training-data-scale/inference-time-scale mismatch: the
+    dataset is resized once to match a real chapter's typical width, but
+    that target was measured from only 4 real chapters -- this keeps the
+    model robust to a range of real-world scales around that estimate
+    rather than overfitting to one exact width. Continuous channels
+    (arr, weight, sdt) use bilinear resize; mask uses nearest-neighbor to
+    stay hard 0/1 (the same reasoning as _binarize_alpha's docstring:
+    smooth resampling of a binary mask bakes in a soft, ambiguous boundary
+    band that isn't present in the source)."""
+    ps = mask.shape[0]
+    zoom = random.uniform(*zoom_range)
+    new_size = max(1, round(ps * zoom))
+    if new_size == ps:
+        return arr, mask, weight, sdt
+
+    interp_cont = cv2.INTER_LINEAR
+    arr_r = cv2.resize(arr, (new_size, new_size), interpolation=interp_cont)
+    mask_r = cv2.resize(mask.astype(np.uint8), (new_size, new_size), interpolation=cv2.INTER_NEAREST) > 0
+    weight_r = cv2.resize(weight, (new_size, new_size), interpolation=interp_cont)
+    sdt_r = cv2.resize(sdt, (new_size, new_size), interpolation=interp_cont)
+
+    if new_size >= ps:
+        off = (new_size - ps) // 2
+        arr_out = arr_r[off:off + ps, off:off + ps]
+        mask_out = mask_r[off:off + ps, off:off + ps]
+        weight_out = weight_r[off:off + ps, off:off + ps]
+        sdt_out = sdt_r[off:off + ps, off:off + ps]
+    else:
+        pad = ps - new_size
+        off = pad // 2
+        arr_out = np.zeros((ps, ps, arr.shape[2]), dtype=arr.dtype)
+        arr_out[:, :, :3] = 1.0
+        mask_out = np.zeros((ps, ps), dtype=bool)
+        weight_out = np.ones((ps, ps), dtype=weight.dtype)
+        sdt_out = np.zeros((ps, ps), dtype=sdt.dtype)
+        arr_out[off:off + new_size, off:off + new_size] = arr_r
+        mask_out[off:off + new_size, off:off + new_size] = mask_r
+        weight_out[off:off + new_size, off:off + new_size] = weight_r
+        sdt_out[off:off + new_size, off:off + new_size] = sdt_r
+
+    return arr_out, mask_out, weight_out, sdt_out
+
+
 def augment_patch(
     arr: np.ndarray, mask: np.ndarray, weight: Optional[np.ndarray] = None,
     sdt: Optional[np.ndarray] = None,
@@ -627,6 +676,7 @@ class PatchDataset(Dataset):
         boundary_loss_radius: int = 3,
         compute_sdt: bool = False,
         sdt_clamp_radius: int = 8,
+        scale_jitter: float = 0.0,
     ) -> None:
         self.pairs = pairs
         self.alpha_threshold = alpha_threshold
@@ -643,6 +693,7 @@ class PatchDataset(Dataset):
         self._dilate_kernel = np.ones((2 * boundary_loss_radius + 1, 2 * boundary_loss_radius + 1), np.uint8)
         self.compute_sdt = compute_sdt
         self.sdt_clamp_radius = sdt_clamp_radius
+        self.scale_jitter = scale_jitter
         self._cache: "OrderedDict[int, Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[Tuple[np.ndarray, np.ndarray]], Optional[Tuple[np.ndarray, np.ndarray]]]]" = OrderedDict()
 
     def __len__(self) -> int:
@@ -725,6 +776,10 @@ class PatchDataset(Dataset):
 
             weight_crop = self._weight_crop(boundary_crop)
             sdt_crop = self._sdt_crop(mask_crop)
+            if self.scale_jitter > 0.0:
+                arr_crop, mask_crop, weight_crop, sdt_crop = scale_jitter_patch(
+                    arr_crop, mask_crop, weight_crop, sdt_crop,
+                    (1.0 - self.scale_jitter, 1.0 + self.scale_jitter))
             if self.augment:
                 arr_crop, mask_crop, weight_crop, sdt_crop = augment_patch(arr_crop, mask_crop, weight_crop, sdt_crop)
 
@@ -742,6 +797,10 @@ class PatchDataset(Dataset):
         arr_crop, mask_crop, boundary_crop = crop_with_padding(arr, mask, x0, y0, ps, boundary)
         weight_crop = self._weight_crop(boundary_crop)
         sdt_crop = self._sdt_crop(mask_crop)
+        if self.scale_jitter > 0.0:
+            arr_crop, mask_crop, weight_crop, sdt_crop = scale_jitter_patch(
+                arr_crop, mask_crop, weight_crop, sdt_crop,
+                (1.0 - self.scale_jitter, 1.0 + self.scale_jitter))
         if self.augment:
             arr_crop, mask_crop, weight_crop, sdt_crop = augment_patch(arr_crop, mask_crop, weight_crop, sdt_crop)
         image = torch.from_numpy(arr_crop.transpose(2, 0, 1).astype(np.float32))
@@ -817,6 +876,7 @@ def train_command(args: argparse.Namespace) -> None:
         boundary_loss_radius=args.boundary_loss_radius,
         compute_sdt=compute_sdt,
         sdt_clamp_radius=args.sdt_clamp_radius,
+        scale_jitter=args.scale_jitter,
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, pin_memory=(device.type == "cuda"), drop_last=True)
 
@@ -837,6 +897,7 @@ def train_command(args: argparse.Namespace) -> None:
             boundary_loss_radius=args.boundary_loss_radius,
             compute_sdt=compute_sdt,
             sdt_clamp_radius=args.sdt_clamp_radius,
+            scale_jitter=args.scale_jitter,
         )
         val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
 
@@ -876,6 +937,7 @@ def train_command(args: argparse.Namespace) -> None:
                 boundary_loss_radius=args.boundary_loss_radius,
                 compute_sdt=compute_sdt,
                 sdt_clamp_radius=args.sdt_clamp_radius,
+                scale_jitter=args.scale_jitter,
             )
             variant_val_loaders[variant] = DataLoader(
                 v_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
@@ -1477,6 +1539,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--sdt-clamp-radius", type=int, default=8,
         help="Pixel radius the signed distance transform target is clamped to "
         "before normalizing to [-1, 1]. Only relevant when --sdt-loss-weight > 0.",
+    )
+    p_train.add_argument(
+        "--scale-jitter", type=float, default=0.0,
+        help="Random per-patch zoom in/out by +-this fraction before other "
+        "augmentations (e.g. 0.2 = 0.8x-1.2x). 0.0 (default) is an exact "
+        "no-op. Guards against overfitting to one exact training-data scale "
+        "when the dataset has been resized to match an estimated real-world "
+        "chapter width measured from a small sample.",
     )
     p_train.add_argument("--min-positive-pixels", type=int, default=256)
     p_train.add_argument("--threshold", type=float, default=0.50)
