@@ -597,6 +597,93 @@ distant regions from a single shared gradient update) might be a more direct way
 "shared weights leak conservatism/aggression across dissimilar regions" theory than adding more
 training data ever can.
 
+### FAILED (severe, informative) — model 15.0, auxiliary signed-distance-transform (SDT) head
+2026-07-13: after four training-side/data-side levers on clauds (sampling ratio, capacity,
+boundary-loss weighting, SFX exposure), all left `DiceBCELoss`'s fundamental nature unchanged —
+independent per-pixel binary classification, no notion of "the predicted boundary should form a
+smooth, geometrically consistent curve." This experiment targeted that directly: added an
+optional second output head to `SmallUNet` (`out_sdt`, gated on construction so it's a true no-op
+when disabled — zero new params/state_dict keys) predicting a per-pixel signed distance to the
+nearest keep/delete boundary (clamped ±8px, normalized to [-1,1]), trained with an independent
+additive smooth-L1 term (`--sdt-loss-weight`, deliberately *not* reusing `--boundary-loss-weight`'s
+weight map, since that map's multiplicative interaction with `pos_weight` was the identified root
+cause of `13.0`'s regression — kept the two mechanisms fully separate on purpose). Verified a true
+no-op at `--sdt-loss-weight 0.0` (byte-identical `PatchDataset` outputs, no `out_sdt` keys in
+`state_dict()`), smoke-tested at a low starting weight (0.2, per this project's own lesson from
+`10.0`/`13.0`'s aggressive first attempts both backfiring) before the full run. Trained
+`15.0-sdt` with `10.0-baseline`'s exact recipe otherwise, clean 109min run, no OOM, best checkpoint
+at epoch 10 (val_loss=0.194, DiceBCE component only — SDT term deliberately excluded from the
+checkpoint-selection metric to stay comparable to every prior checkpoint).
+
+**Result: regressed, broadly and severely — the worst outcome of the four training-side levers
+tried for clauds.** Evaluated the same way as every prior clauds attempt (3 clauds crops, 3
+white-bg crops, plus the 18-coordinate broad `compare_models_video.py --screenshots` spot-check,
+both with and without `--reclaim-islands`) and additionally against `--sdt-fusion` (the planned
+inference-time mitigation, using the SDT head's own zero-crossing to refine the primary
+classifier's boundary decision within a narrow band).
+
+- **All 3 dedicated clauds crops got worse, unambiguously** — larger, more solid red intrusions
+  than `10.0-baseline` at the exact same bubble instances in every case, not a subtle shift.
+- **Broad spot-check: severe, wide-reaching regression, not narrowly confined to clauds.** Of 18
+  coordinates: 1 showed a genuine improvement, ~6 showed no meaningful difference, and **10+
+  showed new or substantially worsened red intrusions**, several severe — a bubble at one
+  coordinate went from a modest scattered bite to nearly half its interior filled red; another
+  showed deep erosion tearing into a previously-clean white character silhouette. Two coordinates
+  reproduce specific failure modes seen in *other* checkpoints' regressions: one shows the same
+  scale of catastrophic bubble-fill seen at `13.0-boundaryloss`'s worst spot, and — most notably —
+  **the exact coordinate that caught `12.0`'s diffuse-fragmentation regression shows that same
+  fragmentation pattern again here**, via a completely different mechanism (auxiliary geometric
+  loss, not capacity).
+- **`--sdt-fusion` does not mitigate the regression.** The fused output is visually indistinguishable
+  from the unfused one. This makes sense in hindsight: unlike `--reclaim-islands` (pure
+  connectivity logic, fully independent of anything the model learned), the SDT head shares the
+  same trunk that produced the regressed primary head — it isn't an independent signal that could
+  correct it, since both were shaped by the same training run.
+- `--reclaim-islands` mitigates the visible damage as it always does for every checkpoint's raw
+  gaps — production-visible impact is smaller than the raw numbers suggest, but this project's own
+  methodology (established across `12.0`/`13.0`) treats the raw-model regression as the real
+  finding, not something islands papers over into a non-finding.
+
+**Mechanistic pattern worth naming explicitly: this is now the third distinct mechanism — after
+capacity (`12.0`) and boundary-loss reweighting (`13.0`) — that adds extra emphasis on boundary
+pixels during training and measurably WORSENS boundary precision, including reproducing the same
+specific failure shapes (severe single-bubble fill, diffuse fragmentation) across otherwise
+unrelated designs.** All three were careful, single-variable, well-motivated attempts targeting
+different parts of the pipeline (network width, loss weighting, an auxiliary task) — none shared
+an implementation bug with each other. The convergent failure suggests the common factor isn't in
+any one mechanism's specific bug, but something more structural: this small U-Net's boundary
+decisions may already be near a stability/capacity limit specific to *this* training data, and any
+additional gradient pressure concentrated there — regardless of form — pushes it past that limit
+rather than sharpening it.
+
+**A concrete, previously-untested candidate explanation exists and points away from more
+training-mechanism engineering: Phase 0 of this session's plan** (before implementing the SDT
+head) found that `PepperNCarrotDataset`'s bubble shapes are not generated per-training-instance —
+`make_bubbles.py` produces a small, fixed set of static assets once (`random.seed(42)`, run
+once): 5 `oval_tail_*` variants (all the same `draw.ellipse(rw=195, rh=110)`, differing only in
+tail angle), one `thought_bubble`, one `cloud_bubble`, one `burst_bubble`(+inv). At training time,
+`synthesize_overlays.py` only ever applies uniform isotropic scaling (aspect ratio locked) and
+repositioning — the outline geometry itself never varies. Across the entire 39-episode dataset,
+the model has been exposed to roughly 8-10 distinct bubble curvature templates total, each
+stamped down at different sizes thousands of times, while real manhwa bubbles vary continuously in
+aspect ratio, size, and hand-drawn asymmetry. **This would explain the convergent pattern above
+directly**: any training-side change that concentrates more gradient weight on boundary pixels is
+concentrating it on a low-diversity, highly-repeated signal — closer to overfitting pressure than
+to learning a general "trace an arbitrary smooth curve precisely" capability. This hypothesis was
+flagged, not tested, this session (out of scope for the SDT experiment's own isolation) — it is
+the most promising remaining lever for clauds, ahead of any further loss- or capacity-side
+mechanism.
+
+**Recommendation: keep `10.0-baseline` as the production checkpoint.** `15.0-sdt` is tracked in
+git for reference only, not recommended for use — it is a clear regression, more severe and
+broader than `12.0` or `13.0`. **Do not attempt a fourth training-mechanism lever (a different
+loss shape, a different auxiliary task, a different capacity/depth change) without new evidence.**
+Given three independent mechanisms have now converged on the same failure pattern, the next
+experiment worth running is the bubble-shape-diversity fix implied by the Phase 0 finding above —
+adding per-instance random aspect ratio and outline-jitter to `make_bubbles.py`'s generators
+instead of reusing ~8-10 static templates — evaluated in its own isolated run, no loss/architecture
+changes bundled in.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
