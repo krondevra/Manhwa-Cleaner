@@ -559,21 +559,29 @@ def scale_jitter_patch(
     arr: np.ndarray, mask: np.ndarray, weight: np.ndarray, sdt: np.ndarray,
     zoom_range: Tuple[float, float],
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Randomly zoom a patch in/out (linear scale jitter) before the other
-    augmentations, then crop/pad back to the original patch size. Guards
-    against a training-data-scale/inference-time-scale mismatch: the
-    dataset is resized once to match a real chapter's typical width, but
-    that target was measured from only 4 real chapters -- this keeps the
-    model robust to a range of real-world scales around that estimate
-    rather than overfitting to one exact width. Continuous channels
-    (arr, weight, sdt) use bilinear resize; mask uses nearest-neighbor to
-    stay hard 0/1 (the same reasoning as _binarize_alpha's docstring:
-    smooth resampling of a binary mask bakes in a soft, ambiguous boundary
-    band that isn't present in the source)."""
+    """Randomly zoom a patch IN (never out) before the other augmentations,
+    then center-crop back to the original patch size. Guards against a
+    training-data-scale/inference-time-scale mismatch: the dataset is
+    resized once to match a real chapter's typical width, but that target
+    was measured from only 4 real chapters -- this keeps the model robust
+    to a range of real-world scales around that estimate rather than
+    overfitting to one exact width. Continuous channels (arr, weight, sdt)
+    use bilinear resize; mask uses nearest-neighbor to stay hard 0/1 (the
+    same reasoning as _binarize_alpha's docstring: smooth resampling of a
+    binary mask bakes in a soft, ambiguous boundary band that isn't present
+    in the source).
+
+    Zoom-out (new_size < ps) is deliberately not supported -- an earlier
+    version padded the shrunk patch with a synthetic "keep" border to fill
+    the gap, which taught the model a real, high-frequency lie (ambiguous/
+    edge regions default to keep) and collapsed it toward drastically
+    under-deleting real background (measured: 87% of true background left
+    undeleted in one full evaluation, see docs/ml_strategy_history.md
+    "model 16.0"). Only zooming in avoids needing to invent any pixels."""
     ps = mask.shape[0]
-    zoom = random.uniform(*zoom_range)
-    new_size = max(1, round(ps * zoom))
-    if new_size == ps:
+    zoom = max(1.0, random.uniform(*zoom_range))
+    new_size = round(ps * zoom)
+    if new_size <= ps:
         return arr, mask, weight, sdt
 
     interp_cont = cv2.INTER_LINEAR
@@ -582,24 +590,11 @@ def scale_jitter_patch(
     weight_r = cv2.resize(weight, (new_size, new_size), interpolation=interp_cont)
     sdt_r = cv2.resize(sdt, (new_size, new_size), interpolation=interp_cont)
 
-    if new_size >= ps:
-        off = (new_size - ps) // 2
-        arr_out = arr_r[off:off + ps, off:off + ps]
-        mask_out = mask_r[off:off + ps, off:off + ps]
-        weight_out = weight_r[off:off + ps, off:off + ps]
-        sdt_out = sdt_r[off:off + ps, off:off + ps]
-    else:
-        pad = ps - new_size
-        off = pad // 2
-        arr_out = np.zeros((ps, ps, arr.shape[2]), dtype=arr.dtype)
-        arr_out[:, :, :3] = 1.0
-        mask_out = np.zeros((ps, ps), dtype=bool)
-        weight_out = np.ones((ps, ps), dtype=weight.dtype)
-        sdt_out = np.zeros((ps, ps), dtype=sdt.dtype)
-        arr_out[off:off + new_size, off:off + new_size] = arr_r
-        mask_out[off:off + new_size, off:off + new_size] = mask_r
-        weight_out[off:off + new_size, off:off + new_size] = weight_r
-        sdt_out[off:off + new_size, off:off + new_size] = sdt_r
+    off = (new_size - ps) // 2
+    arr_out = arr_r[off:off + ps, off:off + ps]
+    mask_out = mask_r[off:off + ps, off:off + ps]
+    weight_out = weight_r[off:off + ps, off:off + ps]
+    sdt_out = sdt_r[off:off + ps, off:off + ps]
 
     return arr_out, mask_out, weight_out, sdt_out
 
@@ -1542,11 +1537,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_train.add_argument(
         "--scale-jitter", type=float, default=0.0,
-        help="Random per-patch zoom in/out by +-this fraction before other "
-        "augmentations (e.g. 0.2 = 0.8x-1.2x). 0.0 (default) is an exact "
-        "no-op. Guards against overfitting to one exact training-data scale "
-        "when the dataset has been resized to match an estimated real-world "
-        "chapter width measured from a small sample.",
+        help="Random per-patch zoom IN (never out) by up to this fraction "
+        "before other augmentations (e.g. 0.2 = up to 1.2x). 0.0 (default) "
+        "is an exact no-op. Guards against overfitting to one exact "
+        "training-data scale when the dataset has been resized to match an "
+        "estimated real-world chapter width measured from a small sample. "
+        "Zoom-out is deliberately unsupported -- it requires padding the "
+        "shrunk patch, and an earlier version's synthetic 'keep' padding "
+        "border taught the model a real, high-frequency lie that collapsed "
+        "it toward drastically under-deleting real background (measured: "
+        "87% of true background left undeleted in one full evaluation, see "
+        "docs/ml_strategy_history.md 'model 16.0').",
     )
     p_train.add_argument("--min-positive-pixels", type=int, default=256)
     p_train.add_argument("--threshold", type=float, default=0.50)
