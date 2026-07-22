@@ -794,6 +794,50 @@ designed approach (e.g. sweep several patch sizes with adequate held-out evaluat
 committing to a single full run, or investigate the `min_positive_pixels`/sampling-ratio
 interaction flagged above first) rather than another single-shot attempt at a middle value.
 
+### NULL RESULT (inference-side, safe, kept) — `--repair-frames` enclosed-hole interior repair
+2026-07-22: first new experiment in the inference-postprocessing family since `--reclaim-islands`/
+`--protect-borders`. Idea (recalled by user from an earlier discussion, never previously written
+down): the model draws frame/bubble strokes cleanly, and per the manual-reference finding
+(`.tmp/notes/manual_reference_findings.md`) correct deletion is purely geometric — so any delete
+pixel inside a region *fully enclosed by near-black strokes in the RGB* is wrong by definition and
+can be forced back to keep. Targets the two interior failure topologies islands can't reach by
+design: bites connected out to real background through other delete pixels, and keep-speck
+fragmentation (model 12.0's defect).
+
+Implemented as `repair_frame_interiors()` + `--repair-frames`/`--frame-darkness`/
+`--frame-min-interior`/`--frame-inset` in `src/ml_cleaner.py`, running last in the postprocess
+chain. Two designs were tested: a per-component "thin closed outline" detector (rejected — real
+bubble outlines are 8-connected via tails/overlapping panel lines into filled dark art, so a
+whole-component stroke-ratio test throws away good holes over guilt-by-association), replaced by
+per-hole acceptance (any enclosed hole >= `--frame-min-interior` px; gutters/margins always touch
+the strip edge so they flood-fill away and can never register as enclosed; provably one-directional,
+delete->keep only). Synthetic smoke passed all cases: closed frame repaired, filled black rect
+untouched, open frame skipped, merged bubble+blob component's hole still repaired.
+
+**Result: exact no-op on every real chapter tested with `10.0-baseline` + islands.** Full-strip
+mask diff on `085.png` (184k rows): 0 pixels changed. Two-directional pixel measurement against the
+human-cleaned manual references `001`/`002` (first-ever eval against real GT, investigation-only
+use): 0 pixels flipped on either. **Mechanism: for this checkpoint, the set of delete pixels inside
+RGB-enclosed holes is empirically a subset of landlocked delete pixels — the model does not delete
+a connected path across an intact dark stroke — so islands already reclaims everything this rule
+can reach.** The hypothesized "bite crossing the outline stays edge-connected" topology does not
+occur in `10.0-baseline`'s output. On the raw (pre-islands) mask the repair does fire (6,083 px on
+one 4k-row slice), confirming the implementation works; islands simply gets there first.
+
+Kept in the codebase anyway: zero cost and zero measured risk (proven byte-identical on production
+output), provably can't add deletions, and it's an independent safety net if a future checkpoint
+develops either target topology. Not part of the recommended production flags — those remain
+`10.0-baseline` + `--reclaim-islands` alone.
+
+**Side finding worth more than the experiment — first direct GT quantification of production
+quality** (vs. human-cleaned `001`/`002`, both directions, % of all pixels): over-deletion 0.61% /
+0.56%, under-deletion **12.41% / 12.47%**. The under-deletion number is dominated by the known,
+deliberate white-bg-only domain limit (the human removes black backgrounds; `10.0-baseline` by
+design does not), but it puts a real number on that gap for the first time: roughly a quarter of
+true background pixels in these chapters are background the current production domain doesn't
+touch. If black-bg support is ever revisited, this is the baseline to beat, measured against real
+ground truth rather than islands-cleaned pseudo-GT.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
