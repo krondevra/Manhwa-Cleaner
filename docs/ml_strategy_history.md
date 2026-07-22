@@ -829,6 +829,21 @@ output), provably can't add deletions, and it's an independent safety net if a f
 develops either target topology. Not part of the recommended production flags — those remain
 `10.0-baseline` + `--reclaim-islands` alone.
 
+**Follow-up, same day — raw mask (no islands), formal subset proof.** Ran the same GT evaluation
+with `--repair-frames` applied directly to the raw model output. It fires substantially there:
+467,899 px flipped on `001`, 189,133 px on `002`, cutting over-deletion 1.65%→1.17% and
+1.29%→1.04% respectively (visual: an entire panel interior + bubble interior eaten by raw
+intrusions comes back clean — `.tmp/repair_frames_eval/raw001_band_*.png`). Accuracy of its flips
+vs GT: 100% right on `001`; 93.8% right on `002` (the 11,776 "wrong" flips are enclosed regions
+the human deleted — islands wrongly reclaims those same pixels plus ~7x more, so frames is the
+*more* GT-accurate of the two where they act). But **frames' flips are a measured 100% subset of
+islands' flips on both chapters** — islands reclaims 2.3-3.2x more in total (it also catches
+landlocked regions not enclosed by dark strokes in the RGB, e.g. bites into white content far from
+any outline). So for `10.0-baseline`: `--repair-frames` is a strictly weaker partial substitute
+for islands, not a complement — useful alone only if islands' topological assumption ever breaks
+(e.g. an input where real background genuinely doesn't reach the image edge, or a checkpoint that
+deletes across intact strokes), which is exactly the safety-net role it's kept for.
+
 **Side finding worth more than the experiment — first direct GT quantification of production
 quality** (vs. human-cleaned `001`/`002`, both directions, % of all pixels): over-deletion 0.61% /
 0.56%, under-deletion **12.41% / 12.47%**. The under-deletion number is dominated by the known,
