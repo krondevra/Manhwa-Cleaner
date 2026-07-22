@@ -24,6 +24,27 @@ that's the entire point of it existing.
   2026-07-06 after models 1.0-2.1 (trained on real chapters) were purged
   from git history for copyright.** Real chapters are inference-only.
 
+  **The exact boundary of that policy, clarified 2026-07-22 (canonical
+  statement — other docs defer here):**
+  - **NEVER**: no real manhwa / copyrighted chapter pixels (including the
+    manual-reference chapters under `.tmp/saved/chapters/` and everything
+    under `data/chapters-initial/`) may contribute training signal to any
+    model, directly or indirectly — no gradient updates, no
+    pseudo-labeling, no distillation, no augmentation or synthetic data
+    derived from them. This applies to fine-tuning any third-party model
+    exactly as it does to training our own.
+  - **EXPLICITLY OK** (established practice throughout this project's
+    history — 085 regression crops, the 2026-07-10 manual-reference study,
+    the 2026-07-22 GT quality numbers): using real chapters as **held-out
+    evaluation targets** — running a trained checkpoint on them and
+    measuring output quality (pixel comparison against the human-cleaned
+    references, visual crop diffs, aggregate two-directional metrics).
+    Same category as testing any tool on real-world input to measure it.
+    No weights are ever updated from that measurement.
+  - The evaluation-only files themselves stay out of version control
+    (gitignored / `.tmp/`) as already practiced — the policy is about what
+    is excluded from training, not about hiding evaluation material.
+
 ## The central recurring problem: isolating "background" from "content"
 The same pixel color can be background or content depending on structure —
 no rule-based or color-threshold approach generalizes. The fix that
@@ -872,11 +893,14 @@ ground truth rather than islands-cleaned pseudo-GT.
    this history was actually caught and root-caused — not by loss numbers
    alone (loss magnitude isn't even comparable across dataset-composition
    changes).
-5. **Real manhwa reference images are for geometry/style inspection only,
-   never training pixels.** Two genuinely useful findings this session (the
-   sci-fi UI-box style, the "real black panels have no border line" insight)
-   came from *looking* at real references without ever using their pixels
-   in the dataset.
+5. **Real manhwa reference images: never training pixels; inspection and
+   held-out evaluation are both fine** — see the canonical policy boundary
+   in the "Core architecture" section at the top of this doc. Two genuinely
+   useful findings came from *looking* at real references (the sci-fi
+   UI-box style, the "real black panels have no border line" insight), and
+   the 2026-07-22 GT quality numbers came from *measuring* against the
+   human-cleaned references — neither ever feeds pixels into the dataset
+   or gradients into a model.
 6. **Per-variant val_loss is not sufficient to catch this class of
    regression.** The tick-marker attempt's `black_ticked` val_loss looked
    completely unremarkable (in line with other variants) on the exact
