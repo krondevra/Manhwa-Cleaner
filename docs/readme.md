@@ -111,6 +111,22 @@ CH=003 && python src/ml_cleaner.py process "$CH" \
   --red-preview
 ```
 
+### Inference postprocessing flags (all process* commands)
+```bash
+  --reclaim-islands   # un-delete regions not connected to any image edge
+                      # (production default -- see docs/ml_strategy_history.md)
+  --repair-frames     # un-delete pixels inside regions fully enclosed by
+                      # near-black strokes (closed panel frames, bubble
+                      # outlines); tune with --frame-darkness (40),
+                      # --frame-min-interior (10000), --frame-inset (2)
+  --protect-borders   # re-keep thin near-black frame lines near kept content;
+                      # tune with --border-band (3), --border-darkness (40)
+```
+Output filenames encode the combination (`v10.0-baseline-islands-...`,
+`...-frames-...`, `...-islandsframes-...`) so configurations never collide.
+Note for `compare_models_video.py`: version tags support only ONE hyphenated
+suffix segment -- `islandsframes` is deliberately one word.
+
 ### list
 ```bash
 python src/ml_cleaner.py process-list \

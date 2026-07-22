@@ -210,16 +210,20 @@ def resolve_chapter_input(value: str | Path, chapters_dir: Path = DEFAULT_CHAPTE
     return path
 
 
-def model_version_prefix(model_path: Path, islands: bool = False) -> str:
+def model_version_prefix(model_path: Path, islands: bool = False, frames: bool = False) -> str:
     """e.g. data/models/3.0.pt -> "v3.0-", so output filenames show which
     checkpoint produced them (075_result.png -> v3.0-075_result.png).
-    With islands=True (--reclaim-islands), inserts "-islands-" so the two
-    postprocessing configurations never collide on disk
-    (v6.0-075_result.png vs v6.0-islands-075_result.png)."""
+    With islands=True (--reclaim-islands) and/or frames=True (--repair-frames),
+    inserts "-islands-"/"-frames-"/"-islandsframes-" so the postprocessing
+    configurations never collide on disk. Both flags together merge into ONE
+    hyphenated segment ("-islandsframes-", not "-islands-frames-") because
+    compare_models_video.py's version-discovery regex only supports a single
+    suffix segment."""
     version = model_path.stem
     if not version.lower().startswith("v"):
         version = f"v{version}"
-    return f"{version}-islands-" if islands else f"{version}-"
+    suffix = f"{'islands' if islands else ''}{'frames' if frames else ''}"
+    return f"{version}-{suffix}-" if suffix else f"{version}-"
 
 
 def resolve_chapter_output(
@@ -1253,6 +1257,108 @@ def protect_frame_borders(rgb: np.ndarray, delete_mask: np.ndarray, band_px: int
     return fixed
 
 
+def repair_frame_interiors(
+    rgb: np.ndarray,
+    delete_mask: np.ndarray,
+    frame_darkness: int,
+    min_interior_px: int,
+    inset_px: int,
+) -> np.ndarray:
+    """Force every "delete" pixel inside a region fully enclosed by near-black
+    strokes (a closed panel frame, a speech-bubble outline, dark art wrapping
+    a light interior) back to "keep".
+
+    Premise, from the manually-cleaned reference chapters
+    (.tmp/notes/manual_reference_findings.md): correct deletion is purely
+    geometric -- page gutter vs. panel -- and real background always runs out
+    to the strip's edge. A light region *fully enclosed* by near-black pixels
+    therefore cannot be background: gutters and margins always touch the
+    image border somewhere, so they flood-fill away and never register as
+    enclosed. This catches the interior failure topologies
+    --reclaim-islands can't: a clauds bite eating inward from a bubble's
+    edge stays connected to outside background through other delete pixels
+    (not landlocked in the mask), but the bubble's own outline still encloses
+    it in the RGB -- a trusted geometric boundary independent of mask
+    topology.
+
+    Acceptance is per enclosed hole, not per stroke component: a bubble
+    outline is usually 8-connected (via its tail or an overlapping panel
+    line) into large filled dark art, so any whole-component "thin outline"
+    test throws away good holes over guilt-by-association. Filled dark
+    regions are inherently safe under the per-hole rule -- a black-background
+    panel has no large enclosed light holes of its own, and the holes it does
+    have (bubbles, faces inside dark art) are exactly content to protect.
+    Broken frames whose gap survives the small stroke-closing step leak to
+    the exterior and are rejected for free. Accepted holes are eroded by
+    inset_px before repair so the stroke's own boundary seam is never
+    overwritten.
+
+    Like reclaim_landlocked_delete_islands, per-component work happens inside
+    each component's bounding-box crop, not on the full strip (inputs can be
+    ~150k px tall)."""
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    stroke = (gray <= frame_darkness).astype(np.uint8)
+    # Bridge small breaks in the frame line (a bubble overlapping the frame,
+    # JPEG noise) so a nearly-closed frame still closes.
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    stroke = cv2.morphologyEx(stroke, cv2.MORPH_CLOSE, k, iterations=1)
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(stroke, connectivity=8)
+
+    fixed = delete_mask.copy()
+    inset_kernel = None
+    if inset_px > 0:
+        inset_kernel = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE, (inset_px * 2 + 1, inset_px * 2 + 1)
+        )
+
+    for label in range(1, num_labels):  # label 0 is the non-stroke background, skip
+        x, y, cw, ch, comp_area = stats[label]
+        # A hole can never exceed the component's own bounding box, so
+        # components whose bbox can't hold stroke + minimum interior (text
+        # glyphs, line-art specks -- the vast majority) are rejected without
+        # ever cropping.
+        if cw * ch < min_interior_px + comp_area:
+            continue
+
+        comp = (labels[y : y + ch, x : x + cw] == label).astype(np.uint8)
+
+        # Pad by 1 so the exterior is a single connected ring, then flood-fill
+        # it from the corner: complement pixels the fill can't reach are holes
+        # fully enclosed by the stroke. An open/broken frame's "interior"
+        # leaks out to the exterior, gets filled, and is rejected for free --
+        # as does any gutter/margin region, which always touches the bbox
+        # border wherever the component spans the strip's width.
+        padded = np.zeros((ch + 2, cw + 2), dtype=np.uint8)
+        padded[1:-1, 1:-1] = comp
+        ff_mask = np.zeros((ch + 4, cw + 4), dtype=np.uint8)
+        cv2.floodFill(padded, ff_mask, (0, 0), 1)
+        holes = (padded[1:-1, 1:-1] == 0).astype(np.uint8)
+        if not holes.any():
+            continue
+
+        # Per-hole size gate: repair only holes big enough to be a real
+        # frame/bubble interior, leaving small enclosed specks (highlights,
+        # texture gaps, tiny letter counters) to the model's own judgment.
+        n_holes, hole_labels, hole_stats, _ = cv2.connectedComponentsWithStats(
+            holes, connectivity=4
+        )
+        interior = np.zeros_like(holes)
+        for hole in range(1, n_holes):
+            if hole_stats[hole, cv2.CC_STAT_AREA] >= min_interior_px:
+                interior[hole_labels == hole] = 1
+        if not interior.any():
+            continue
+
+        if inset_kernel is not None:
+            interior = cv2.erode(interior, inset_kernel, iterations=1)
+
+        region = fixed[y : y + ch, x : x + cw]
+        region[interior.astype(bool)] = False
+
+    return fixed
+
+
 def process_command(args: argparse.Namespace) -> None:
     device = choose_device(args.device)
     log(f"device: {device}")
@@ -1268,7 +1374,7 @@ def process_command(args: argparse.Namespace) -> None:
     input_path = resolve_chapter_input(args.input, DEFAULT_CHAPTERS_LONG_DIR)
     output_path = resolve_chapter_output(
         input_path, args.output, DEFAULT_CHAPTERS_RESULTS_DIR,
-        model_version_prefix(model_path, islands=args.reclaim_islands),
+        model_version_prefix(model_path, islands=args.reclaim_islands, frames=args.repair_frames),
     )
 
     if not input_path.exists():
@@ -1301,6 +1407,11 @@ def process_command(args: argparse.Namespace) -> None:
 
     if args.protect_borders:
         delete_mask = protect_frame_borders(rgb, delete_mask, args.border_band, args.border_darkness)
+
+    if args.repair_frames:
+        delete_mask = repair_frame_interiors(
+            rgb, delete_mask, args.frame_darkness, args.frame_min_interior, args.frame_inset,
+        )
 
     save_rgba(output_path, rgb, delete_mask)
     log(f"saved: {output_path}")
@@ -1355,7 +1466,7 @@ def process_folder_command(args: argparse.Namespace) -> None:
         morph_radius=int(config.get("morph_radius", args.morph_radius)),
     )
 
-    prefix = model_version_prefix(model_path, islands=args.reclaim_islands)
+    prefix = model_version_prefix(model_path, islands=args.reclaim_islands, frames=args.repair_frames)
 
     log(f"model: {model_path}")
     log(f"input: {input_dir}")
@@ -1389,6 +1500,11 @@ def process_folder_command(args: argparse.Namespace) -> None:
 
         if args.protect_borders:
             delete_mask = protect_frame_borders(rgb, delete_mask, args.border_band, args.border_darkness)
+
+        if args.repair_frames:
+            delete_mask = repair_frame_interiors(
+                rgb, delete_mask, args.frame_darkness, args.frame_min_interior, args.frame_inset,
+            )
 
         save_rgba(output_path, rgb, delete_mask)
 
@@ -1434,6 +1550,30 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--border-band", type=int, default=3, help="Max px from kept content to protect")
     parser.add_argument("--border-darkness", type=int, default=40, help="Grayscale <= this counts as 'near-black'")
+    parser.add_argument(
+        "--repair-frames",
+        action="store_true",
+        help="Force every 'delete' pixel inside a region fully enclosed by near-black "
+        "strokes in the input RGB (a closed panel frame or speech-bubble outline) back "
+        "to 'keep'. Correct deletion is purely geometric (page gutter vs. panel) and "
+        "real background always reaches the strip edge, so an enclosed light region "
+        "can never be background. Repairs the interior failure topologies "
+        "--reclaim-islands can't reach (edge-connected clauds bites, keep-speck "
+        "fragmentation). Cheap, no retraining; runs last in the postprocess chain.",
+    )
+    parser.add_argument(
+        "--frame-darkness", type=int, default=40,
+        help="Grayscale <= this counts as frame stroke for --repair-frames",
+    )
+    parser.add_argument(
+        "--frame-min-interior", type=int, default=10000,
+        help="Minimum enclosed-hole pixels for --repair-frames to repair an interior",
+    )
+    parser.add_argument(
+        "--frame-inset", type=int, default=2,
+        help="Erode each repaired interior by this many px so the frame stroke's own "
+        "seam is never overwritten by --repair-frames",
+    )
     parser.add_argument(
         "--sdt-fusion", action="store_true",
         help="If the loaded checkpoint has an auxiliary SDT head (trained with "
