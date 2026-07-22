@@ -22,6 +22,7 @@ psd/
 __pycache__/
 *.pyc
 .venv/
+.venv-cascadepsp/
 /.backup
 /materials
 /output

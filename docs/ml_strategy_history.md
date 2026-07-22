@@ -874,6 +874,69 @@ true background pixels in these chapters are background the current production d
 touch. If black-bg support is ever revisited, this is the baseline to beat, measured against real
 ground truth rather than islands-cleaned pseudo-GT.
 
+### PROBE (zero-shot, mixed — mechanism works, priors wrong) — CascadePSP pretrained refinement
+2026-07-22: first experiment from the `.tmp/INSPIRATION/` papers review (item 1 in
+`.tmp/notes/inspiration_papers_review.md`). Motivation: three independent trunk-side mechanisms
+(capacity/12.0, boundary-loss/13.0, SDT/15.0) failed convergently on clauds — pointing at a
+mechanism OUTSIDE the trunk. CascadePSP (Cheng et al. 2020, github.com/hkchengrex/CascadePSP) is a
+class-agnostic refinement network (RGB + coarse mask → pixel-accurate mask), trained independently
+on perturbed ground-truth masks, designed for train-low-res/apply-high-res mismatch. **Probe only:
+pretrained weights, zero-shot, no finetuning, no changes to `10.0-baseline` or the dataset.**
+
+Setup: isolated `.venv-cascadepsp` (CPU torch 2.13 + torchvision 0.28+cpu + pip
+`segmentation-refinement`; the 2020 package runs fine on python 3.14 — one gotcha: torchvision must
+come from the pytorch CPU index, the PyPI wheel mismatches and crashes on `torchvision::nms`).
+Probe harness: `src/probe_cascadepsp.py` (spots / clauds / gt subcommands; foreground-mask
+convention = keep = ~delete_mask, binarize refined soft mask at 127). Synthetic sanity: coarse
+IoU 0.711 → refined 1.000. Runtime (CPU, full mode): ~5-37s per 900px window, 13-112s per
+4000-row band, ~1.5h for both GT chapters.
+
+**Results** (all vs `10.0-baseline`+islands production output):
+- **3 clauds crops**: bubble outlines get visibly smoother/crisper — the refinement mechanism
+  genuinely engages with line-art boundaries. Black-panel crop (clauds_3) untouched (0 flips).
+- **18-coordinate spot-check (085)**: heavy one-sided churn — 620,991 px flipped keep→del vs
+  89,243 del→keep. No GT on 085, adjudicated on the GT chapters below.
+- **GT chapters (manual references, held-out eval per the clarified policy)**:
+  | chapter | config | over-del | under-del | total err |
+  |---|---|---|---|---|
+  | 001 | islands | 0.61% | 12.40% | 13.01% |
+  | 001 | +cascadepsp | 1.58% | 9.73% | **11.31%** |
+  | 002 | islands | 0.57% | 12.45% | 13.02% |
+  | 002 | +cascadepsp | 2.58% | 9.48% | **12.06%** |
+  Flip accuracy vs the human etalon: keep→del 71.3% right (001) / 60.0% right (002);
+  del→keep 79.0% right (001) / 26.9% right (002).
+
+**The two faces, both verified visually:**
+- **Win (looks like the etalon)**: gutter cleanup. Stranded white keep-specks around SFX glyphs
+  and bubbles — the exact under-deletion topology neither `--reclaim-islands` nor
+  `--repair-frames` can touch (both only un-delete) — get wiped to match the human etalon almost
+  exactly, while the glyphs/bubbles themselves stay crisp
+  (`.tmp/cascadepsp_probe/gt001_diff2_y65037_COMBO.png` — 4-way comparison incl. etalon). This
+  also settled a convention question: the human DOES delete the white fluff around glyphs.
+- **Failure (the whole over-del increase)**: full-bleed color panels. Low-texture interior
+  regions (sky, cloud bands, sea) get carved out of real artwork
+  (`gt001_diff0_y7850_*` previews) — natural-image saliency priors treating them as background.
+  1.07M px (001) / 1.47M px (002) of destroyed content — and over-deletion is the worse error
+  class for this pipeline (content loss is unrecoverable in output; under-deletion is leftover
+  background a human can still erase).
+
+**Honest adjudication**: net total pixel error DROPS on both chapters zero-shot — but the error
+composition shifts toward content destruction, so this is **not usable as-is** in production. The
+failure mode is semantic (wrong domain priors about what counts as an object), not mechanical —
+where its object prior matches this domain (bubbles, SFX, gutters), output approaches the human
+etalon; where it doesn't (full-color scenic panels), it hallucinates background inside artwork.
+This is exactly the ToonOut-predicted natural-image→toon domain gap, and it is **consistent with
+"needs P&C-specific training of the refinement scheme", not with "refinement is a poor fit for
+this content"** — the probe's stated question. A P&C-trained refinement experiment (their
+perturbed-ground-truth training scheme on our pairs) is now evidence-supported and worth scoping
+as its own properly-designed experiment — NOT committed to by this probe, and out of scope here
+per the probe's charter. Also noteworthy: zero-shot it already partially attacks both open
+defect classes (keep-speck under-deletion; some of the background reduction sits in regions the
+white-bg-only production domain deliberately never touches).
+
+**Production recommendation unchanged: `10.0-baseline` + `--reclaim-islands`.** Probe artifacts:
+`src/probe_cascadepsp.py` (tracked), previews/log in `.tmp/cascadepsp_probe/`.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
