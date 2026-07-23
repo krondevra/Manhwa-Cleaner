@@ -16,6 +16,10 @@ data/models/2.0.json
 data/models/2.0.pt
 data/models/2.1.json
 data/models/2.1.pt
+# CascadePSP-family checkpoints (ResNet50-based, ~260MB+) exceed GitHub's 100MB
+# hard limit -- distribute these as GitHub Release assets instead, not git-tracked.
+# SmallUNet checkpoints (~14MB, everything else in data/models/) stay tracked as before.
+data/models/cascadepsp-*
 reports/
 .logs/
 psd/
