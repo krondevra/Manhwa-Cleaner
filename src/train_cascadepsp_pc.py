@@ -9,9 +9,9 @@ produced by src/export_cascadepsp_pairs.py from data/dataset_split_scaled/
 (P&C only -- never real manhwa; policy: docs/ml_strategy_history.md "Core
 architecture").
 
-Reuses CascadePSP's own training code (cloned to .tmp/CascadePSP, NOT
+Reuses CascadePSP's own training code (cloned to data/CascadePSP, NOT
 committed -- third-party code, fetched via
-`git clone https://github.com/hkchengrex/CascadePSP.git .tmp/CascadePSP`)
+`git clone https://github.com/hkchengrex/CascadePSP.git data/CascadePSP`)
 for the model (models/psp/pspnet.py::PSPNet), the online IoU-targeted
 boundary-perturbation engine (util/boundary_modification.py::modify_boundary
 -- generates the coarse "seg" input from a clean GT mask on the fly, so we
@@ -61,12 +61,12 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CASCADEPSP = REPO_ROOT / ".tmp" / "CascadePSP"
+CASCADEPSP = REPO_ROOT / "data" / "CascadePSP"
 if not CASCADEPSP.is_dir():
     sys.exit(
         f"CascadePSP training code not found at {CASCADEPSP}.\n"
         "Clone it first (third-party code, not committed to this repo):\n"
-        "  git clone https://github.com/hkchengrex/CascadePSP.git .tmp/CascadePSP\n"
+        "  git clone https://github.com/hkchengrex/CascadePSP.git data/CascadePSP\n"
         "Then apply the CPU/ROCm compat patch to models/sobel_op.py (removes two\n"
         "hardcoded .cuda() calls) -- see .tmp/notes/cascadepsp_finetune_plan.md Phase 0."
     )
