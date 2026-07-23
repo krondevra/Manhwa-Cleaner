@@ -12,14 +12,42 @@ separately in the first place).
   history rather than being deleted at the seams).
 
 ## Commit versioning scheme
-- All commits renumbered to `N.XX.YY`: `N` = generation (1/2/3), `XX` =
+- All commits renumbered to `N.XX.YY`: `N` = generation, `XX` =
   feature number within that generation, `YY` = version of that feature.
-  Later simplified from zero-padded (`1.09.01`) to unpadded (`1.9.1`,
-  `1.10.1`).
+  No zero-padding (`1.9.1`, `1.10.1`, not `1.09.01`).
 - For gen1, the mapping came directly from the project's existing
   semver-like tags (`v0.1.0`, etc). For gen2/gen3, which had no descriptive
   commit messages at all, feature/version grouping was inferred from diff
   content and commit adjacency.
+- Bugfixes of an earlier feature reuse that feature's `XX` with `YY+1` —
+  they can appear out of `XX` order in the log if a later feature's commits
+  land in between (e.g. `4.8.2`/`4.8.3` are fixes of feature `4.8`, logged
+  after `4.9.1`).
+
+### Generation boundaries
+- **1-2**: the two legacy repos this one was merged from (gen1
+  `1.ML-Cleaner`, gen2 `2.Manhwa-Production`), pre-merge.
+- **3**: rule-based → classical ML → deep-learning pivot, through model
+  12.0's capacity experiment. Ends at `3.48.1`.
+- **4**: further training-side levers on the "clauds" bubble-edge defect
+  after capacity was ruled out — boundary-loss weighting (13.0), an
+  auxiliary SDT head (15.0), scale-match (16.0/17.0) — plus
+  `--repair-frames` inference postprocessing. Runs `4.1.1`-`4.15.2`.
+- **5**: the CascadePSP refinement era — real-manhwa policy clarification,
+  zero-shot probe, Pepper & Carrot finetune. Starts at `5.1.1`, ongoing.
+
+### 2026-07-23 history rewrite
+23 commits made between `3.48.1` and the CascadePSP work had never been
+given version prefixes (an oversight, not a deliberate change of
+convention). Rewritten in place via `git filter-branch --msg-filter` to
+apply the scheme retroactively, splitting the ungrouped run into
+generations 4 and 5 per the boundaries above. Old pre-rewrite hashes are
+preserved on branch `backup/pre-restructure-2026-07-23` — nothing was
+deleted, only the commit messages changed (content diff between the
+backup branch and the rewritten history is empty). Full record:
+`.tmp/notes/restructure_2026-07-23_plan.md`. Reference commits by version
+number from this point forward, not by hash, since a rewrite changes every
+descendant hash.
 
 ## File collapsing
 - Gen1's separately-numbered file versions were collapsed into single
