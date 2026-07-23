@@ -144,7 +144,19 @@ def ensemble_component(delete_ft: np.ndarray, delete_zs: np.ndarray,
     panel, frac=0.004, on that exact band). A qualifying eroded component is
     dilated back by the same radius (intersected with the ORIGINAL keep_ft)
     to recover close to its true pre-erosion extent before the pixel swap,
-    rather than leaving a shrunk/incomplete cleanup."""
+    rather than leaving a shrunk/incomplete cleanup.
+
+    The area cap is checked against this dilated-back (true) extent, not the
+    eroded label's own stats area. Found necessary by direct inspection
+    (gt002 y=96627): a steam-effect+shirt region genuinely fused across a
+    wide contact area survives erosion=15 as a 44507px eroded fragment (under
+    the 60000 cap) whose true dilated-back extent is 62120px -- i.e. erosion
+    was shrinking the MEASURED size of a component that is actually too large
+    to safely swap, not just its raw label footprint. Checking the eroded
+    area let this large fused region slip under the cap and deleted real
+    content (regression on that chapter); checking the true extent instead
+    keeps it correctly excluded, matching what an unerode (erode=0) pass
+    would have done for the same region (single 73718px component, capped)."""
     keep_ft = (~delete_ft).astype(np.uint8)
     if erode_px > 0:
         k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (erode_px * 2 + 1, erode_px * 2 + 1))
@@ -155,15 +167,18 @@ def ensemble_component(delete_ft: np.ndarray, delete_zs: np.ndarray,
     n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(label_source, connectivity=8)
     result = delete_ft.copy()
     for label in range(1, n_labels):  # label 0 is the delete-side background
-        area = int(stats[label, cv2.CC_STAT_AREA])
+        comp = labels == label
+        if k is not None:
+            true_extent = (cv2.dilate(comp.astype(np.uint8), k) > 0) & (keep_ft > 0)
+            area = int(np.count_nonzero(true_extent))
+        else:
+            true_extent = comp
+            area = int(stats[label, cv2.CC_STAT_AREA])
         if area_max is not None and area >= area_max:
             continue
-        comp = labels == label
-        frac = np.count_nonzero(delete_zs & comp) / area
+        frac = np.count_nonzero(delete_zs & comp) / int(stats[label, cv2.CC_STAT_AREA])
         if frac >= frac_thresh:
-            if k is not None:
-                comp = (cv2.dilate(comp.astype(np.uint8), k) > 0) & (keep_ft > 0)
-            result[comp] = delete_zs[comp]
+            result[true_extent] = delete_zs[true_extent]
     return result
 
 
