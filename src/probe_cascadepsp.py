@@ -78,7 +78,7 @@ def pct(n: int, d: int) -> str:
 
 
 class Prober:
-    def __init__(self, fast: bool = False):
+    def __init__(self, fast: bool = False, weights: Path | None = None):
         self.device = torch.device("cpu")
         self.model, self.config = load_model(MODEL, self.device)
         self.threshold = float(self.config.get("threshold", 0.5))
@@ -87,6 +87,18 @@ class Prober:
             morph_radius=int(self.config.get("morph_radius", 2)),
         )
         self.refiner = sr.Refiner(device="cpu")
+        if weights is not None:
+            # Our finetune runner (train_cascadepsp_pc.py) saves checkpoints
+            # with a 'module.' prefix (matching what nn.DataParallel would
+            # produce), the same convention segmentation_refinement.Refiner
+            # itself expects and strips -- reuse that exact logic so both
+            # the stock release checkpoint and our finetuned ones load the
+            # same way.
+            state = torch.load(str(weights), map_location="cpu", weights_only=False)
+            stripped = {(k[7:] if k.startswith("module.") else k): v for k, v in state.items()}
+            self.refiner.model.load_state_dict(stripped)
+            self.refiner.model.eval()
+            print(f"loaded finetuned weights: {weights}")
         self.fast = fast
 
     def delete_mask(self, rgb: np.ndarray) -> np.ndarray:
@@ -106,7 +118,7 @@ class Prober:
         return soft <= 127  # refined keep<=127 -> delete
 
 
-def window_eval(prober: Prober, rgb_page: np.ndarray, name: str, y: int, h: int) -> dict:
+def window_eval(prober: Prober, rgb_page: np.ndarray, name: str, y: int, h: int, out_dir: Path = OUT) -> dict:
     """Mask + refine on a margined slice, evaluate/preview the central window."""
     H = rgb_page.shape[0]
     y0, y1 = max(0, y - MARGIN), min(H, y + h + MARGIN)
@@ -120,33 +132,33 @@ def window_eval(prober: Prober, rgb_page: np.ndarray, name: str, y: int, h: int)
     w_isl, w_ref, w_rgb = islands[ly:ly + h], refined[ly:ly + h], rgb[ly:ly + h]
     to_keep = int(np.count_nonzero(w_isl & ~w_ref))    # deletions removed
     to_del = int(np.count_nonzero(~w_isl & w_ref))     # deletions added
-    save_red_preview(OUT / f"{name}_islands.png", w_rgb, w_isl)
-    save_red_preview(OUT / f"{name}_cascadepsp.png", w_rgb, w_ref)
+    save_red_preview(out_dir / f"{name}_islands.png", w_rgb, w_isl)
+    save_red_preview(out_dir / f"{name}_cascadepsp.png", w_rgb, w_ref)
     print(f"  {name}: refine {dt:.1f}s | flips in window: {to_keep} del->keep, "
           f"{to_del} keep->del (window {w_isl.size} px)")
     return {"to_keep": to_keep, "to_del": to_del, "secs": dt}
 
 
-def run_spots(prober: Prober) -> None:
+def run_spots(prober: Prober, out_dir: Path = OUT) -> None:
     print(f"== spots: 18-coordinate broad set on {CHAPTER_085.name} (full-mode) ==")
     page = np.asarray(Image.open(CHAPTER_085).convert("RGB"))
     totals = {"to_keep": 0, "to_del": 0}
     for y in SPOT_YS:
-        s = window_eval(prober, page, f"spot_y{y}", y, SPOT_H)
+        s = window_eval(prober, page, f"spot_y{y}", y, SPOT_H, out_dir)
         totals["to_keep"] += s["to_keep"]
         totals["to_del"] += s["to_del"]
     print(f"  TOTAL across 18 windows: {totals['to_keep']} del->keep, "
           f"{totals['to_del']} keep->del")
 
 
-def run_clauds(prober: Prober) -> None:
+def run_clauds(prober: Prober, out_dir: Path = OUT) -> None:
     print(f"== clauds: 3 fixed crops on {CHAPTER_085.name} (full-mode) ==")
     page = np.asarray(Image.open(CHAPTER_085).convert("RGB"))
     for name, y, h in CLAUDS:
-        window_eval(prober, page, name, y, h)
+        window_eval(prober, page, name, y, h, out_dir)
 
 
-def run_gt(prober: Prober, budget_secs: float = 7200.0) -> None:
+def run_gt(prober: Prober, budget_secs: float = 7200.0, out_dir: Path = OUT) -> None:
     print("== gt: manual-reference chapters (held-out evaluation, never training) ==")
     for ch in GT_CHAPTERS:
         rgb = np.asarray(Image.open(GT_DIR / f"{ch}.png").convert("RGB"))
@@ -209,26 +221,42 @@ def run_gt(prober: Prober, budget_secs: float = 7200.0) -> None:
             bands.sort(key=lambda bb: -int(np.count_nonzero(diff[bb[0]:bb[1] + 1])))
             for i, (r0, r1) in enumerate(bands[:3]):
                 p0, p1 = max(0, r0 - 150), min(H, r1 + 150)
-                save_red_preview(OUT / f"gt{ch}_diff{i}_y{p0}_islands.png", rgb[p0:p1], islands[p0:p1])
-                save_red_preview(OUT / f"gt{ch}_diff{i}_y{p0}_cascadepsp.png", rgb[p0:p1], refined[p0:p1])
+                save_red_preview(out_dir / f"gt{ch}_diff{i}_y{p0}_islands.png", rgb[p0:p1], islands[p0:p1])
+                save_red_preview(out_dir / f"gt{ch}_diff{i}_y{p0}_cascadepsp.png", rgb[p0:p1], refined[p0:p1])
             print(f"  saved previews for top {min(3, len(bands))} of {len(bands)} changed band(s)")
 
 
 def main() -> None:
+    # Redirected stdout is fully-buffered, not line-buffered -- a long run's
+    # progress prints silently sit unflushed until exit (learned the hard way
+    # during the finetune's Phase 2 pilot; see cascadepsp_finetune_plan.md).
+    sys.stdout.reconfigure(line_buffering=True)
+
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("set", choices=["spots", "clauds", "gt", "all"])
     ap.add_argument("--fast", action="store_true",
                     help="CascadePSP fast mode (global step only) everywhere")
+    ap.add_argument("--weights", type=Path, default=None,
+                    help="path to a finetuned checkpoint (e.g. from train_cascadepsp_pc.py) "
+                    "instead of the stock pretrained CascadePSP release weights")
+    ap.add_argument("--out-dir", type=Path, default=None,
+                    help="override output dir (default: .tmp/cascadepsp_probe, or "
+                    ".tmp/cascadepsp_probe_finetuned when --weights is set, so a "
+                    "finetuned run never overwrites the zero-shot probe's saved results)")
     args = ap.parse_args()
 
-    OUT.mkdir(parents=True, exist_ok=True)
-    prober = Prober(fast=args.fast)
+    out_dir = args.out_dir
+    if out_dir is None:
+        out_dir = OUT if args.weights is None else ROOT / ".tmp" / "cascadepsp_probe_finetuned"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    prober = Prober(fast=args.fast, weights=args.weights)
     if args.set in ("clauds", "all"):
-        run_clauds(prober)
+        run_clauds(prober, out_dir)
     if args.set in ("spots", "all"):
-        run_spots(prober)
+        run_spots(prober, out_dir)
     if args.set in ("gt", "all"):
-        run_gt(prober)
+        run_gt(prober, out_dir=out_dir)
 
 
 if __name__ == "__main__":
