@@ -937,6 +937,113 @@ white-bg-only production domain deliberately never touches).
 **Production recommendation unchanged: `10.0-baseline` + `--reclaim-islands`.** Probe artifacts:
 `src/probe_cascadepsp.py` (tracked), previews/log in `.tmp/cascadepsp_probe/`.
 
+### RESULT (positive, net improvement — not yet production-ready) — CascadePSP finetuned on P&C
+2026-07-22/23: the follow-up experiment the zero-shot probe's adjudication called for. Scoped in
+`.tmp/notes/cascadepsp_finetune_plan.md` (read that note for full design detail — training-pair
+generation, stratified sampling rationale, hardware/compat findings); this entry records the
+result. **Never trained on real manhwa** — P&C only, per the clarified policy above; manual-
+reference chapters 001/002 used only as held-out evaluation, same as every other checkpoint.
+
+**Setup**: cloned CascadePSP's own training code (`.tmp/CascadePSP/`, third-party, not committed;
+one compat patch needed — `models/sobel_op.py` hardcoded `.cuda()` on its Sobel kernels, removed).
+Exported 1255 train / 140 val (image, clean keep-mask) pairs (`src/export_cascadepsp_pairs.py`)
+from `data/dataset_split_scaled/` — only the variants `10.0-baseline` itself trains on
+(`BASE_VARIANTS`/`OVERLAY_VARIANTS` minus `"initial"`), so the refiner sees the same domain as the
+model it refines. CascadePSP's own `OnlineTransformDataset`/`boundary_modification.modify_boundary`
+already synthesizes the coarse "seg" input online per sample (random IoU-targeted dilate/erode/
+hole-punching) — no offline perturbation-pair generator was needed, simplifying the original scope.
+Added `StratifiedRefinementDataset` (`src/train_cascadepsp_pc.py`) on top of that: crops are
+centered on one of three strata (30/40/30 low_texture/boundary/uniform) instead of uniformly
+random — `low_texture` targets flat/low-local-contrast KEEP interiors (the zero-shot probe's
+carved-out sky/cloud/sea failure mode, must learn to RESTORE), `boundary` targets mask-contour
+regions (the probe's genuine gutter/SFX win, must learn to preserve/extend it). Finetuned the
+pretrained release weights (not from-scratch — dataset size matches the ToonOut finetuning
+precedent, and the pretrained boundary machinery already worked in the probe; only the semantic
+priors needed to shift).
+
+**Two real bugs found and fixed during Phase 2 piloting** (both now permanent lessons):
+1. `--workers > 0` silently defeated the whole stratified-sampling safeguard — each DataLoader
+   worker forks its own copy of the dataset object, so `StratifiedRefinementDataset.counts`
+   mutations never reached the main process (a 60-step pilot logged all-zero counts the entire
+   run despite the design working correctly in isolation). Fixed by defaulting to `--workers 0`
+   — justified since GPU compute (~10s/step) totally dominates 224px JPEG-decode cost, so
+   multi-worker loading buys nothing here.
+2. Redirected stdout is fully-buffered, not line-buffered — a 400-step pilot showed zero progress
+   for 20+ minutes (looked exactly like a hang; diagnosed via `ps -o etimes=,time=` showing CPU
+   time tracking elapsed time almost exactly, i.e. genuinely computing, not stuck). Fixed with
+   `sys.stdout.reconfigure(line_buffering=True)` in both training and eval scripts — same risk
+   class as this project's existing "silent OOM" monitoring lesson, different mechanism.
+
+**Pilot (400 steps, corrected config): loss 6.66→~0.6-0.8, healthy convergence; real GPU timing
+10.24s/step (890M iGPU, batch=2) — informed the Phase 3 step-count choice (4000 steps ≈ 11.4h
+projected, an overnight-to-next-day run, not the "overnight" originally guessed pre-measurement).**
+
+**Full finetune: 4000 steps, 14.1h wall-clock, loss converged to ~0.07-0.15 range (from 6.66),
+strata mix held at 28.2%/40.3%/31.6% vs the 30/40/30 target throughout the entire run** —
+confirms the stratified design worked as intended in the real training stream, not just in the
+isolated dry-run. Checkpoint: `data/models/cascadepsp-pc-finetune-1.0.pth`.
+
+**Evaluation (same three sets as the zero-shot probe, for direct comparison):**
+- **3 clauds crops**: crops 1/2 show far less over-deletion than zero-shot (13,016/13,614
+  keep→del vs zero-shot's 26,864/40,806) alongside more restorative del→keep activity; crop 3
+  (black panel) still correctly untouched (0 flips), matching zero-shot and production.
+- **18-coordinate spot set, aggregate**: del→keep 89,243→281,014 (3.15x more restorative
+  cleanup), keep→del 620,991→286,960 (53.8% reduction in over-deletion) vs zero-shot. Not
+  uniform across every coordinate — most spots improved substantially (several to near-zero
+  over-deletion), a few improved only modestly, one (`y=120700`, already flagged in the
+  zero-shot writeup as heavy two-directional churn) stayed essentially flat.
+- **GT chapters 001/002, two-directional, the decisive numbers**:
+
+  | | over-del | under-del | total error |
+  |---|---|---|---|
+  | ch001 islands (production) | 0.61% | 12.40% | 13.02% |
+  | ch001 islands+cascadepsp zero-shot | 1.58% | 9.73% | 11.31% |
+  | **ch001 islands+cascadepsp FINETUNED** | **0.37%** | **10.61%** | **10.98%** |
+  | ch002 islands (production) | 0.57% | 12.45% | 13.02% |
+  | ch002 islands+cascadepsp zero-shot | 2.58% | 9.48% | 12.06% |
+  | **ch002 islands+cascadepsp FINETUNED** | **0.77%** | **10.85%** | **11.62%** |
+
+  **Finetuned achieves the best net total pixel error of all three configurations on BOTH real
+  GT chapters.** On ch001, over-deletion drops even below the production baseline (0.37% vs
+  0.61%) — the finetune didn't just mitigate the zero-shot regression, it beat doing nothing.
+  On ch002 it doesn't quite get there (0.77% vs production's 0.57%) but still cuts zero-shot's
+  over-deletion by ~70%. Flip-accuracy vs GT: keep→del (additional cleanup) is precise, 91.1%/
+  83.3% right on ch001/ch002 — most of the extra deletion is genuinely correct. del→keep
+  (restoration) is markedly weaker, 48.1%/36.6% right — roughly half of what gets restored on
+  ch001, worse on ch002, is wrong. **This asymmetry is exactly what explains the ch002 over-del
+  regression vs production**: lower restoration precision there means more legitimate
+  deletions get incorrectly undone.
+
+  Visual confirmation of both directions (`.tmp/cascadepsp_probe_finetuned/COMBO_*.png`): a
+  UI-box gutter case shows a completely clean win (stranded glow fragments fully wiped, boxes
+  crisp, indistinguishable from a manual clean); an SFX-glyph case shows the same correct halo
+  restoration alongside a spurious white column bleeding into real gutter background nearby —
+  a concrete instance of the del→keep imprecision, plausibly CascadePSP's own blob-connecting
+  behavior over-extending from a nearby high-confidence keep region.
+
+**Honest verdict**: a real, measured net improvement over both prior configurations (production
+alone, zero-shot refinement) on the only metric that matters (total pixel error against real
+human ground truth) — the zero-shot probe's diagnosis ("needs P&C-specific training, not a poor
+fit") is confirmed, not just plausible. **Not yet a production adoption**, for two concrete,
+fixable reasons rather than a fundamental flaw: (1) del→keep precision (36-48%) is too low,
+directly traceable to the still-imperfect restoration behavior visible in the crop above — a
+lower `--strata-ratios` weight on `low_texture`, more steps, or an earlier checkpoint (a
+mid-training checkpoint may generalize better than step 4000 if this is overfitting to the small
+unique-page-content set) are the concrete next things to try; (2) CascadePSP inference itself is
+heavy (multiple seconds to ~40s per production-sized window on CPU in this eval) — production
+integration needs either GPU inference or a lighter-weight distilled model, neither built yet.
+**Next step if continued: hold out a true validation split with tracked val loss (this run had
+none — train loss only), sweep 2-3 checkpoints (e.g. step 1750, 2500, 4000) against the same
+GT harness to find the best generalizing point rather than assuming later=better**, before any
+production integration work.
+
+Artifacts: `src/export_cascadepsp_pairs.py`, `src/train_cascadepsp_pc.py` (both tracked),
+`data/models/cascadepsp-pc-finetune-1.0.pth` (gitignored, reproducible from the scripts + P&C
+data), full logs/previews in `.tmp/cascadepsp_finetune_1.0.log` / `.tmp/cascadepsp_finetune_eval.log`
+/ `.tmp/cascadepsp_probe_finetuned/`. **Production recommendation still unchanged: `10.0-baseline`
++ `--reclaim-islands`** — this result is a promising, well-evidenced research direction, not a
+drop-in replacement yet.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
