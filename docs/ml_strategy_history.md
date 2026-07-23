@@ -1044,6 +1044,86 @@ data), full logs/previews in `.tmp/cascadepsp_finetune_1.0.log` / `.tmp/cascadep
 + `--reclaim-islands`** — this result is a promising, well-evidenced research direction, not a
 drop-in replacement yet.
 
+### RESULT (small net win, partial — under-del target not met) — spatial ensemble of zero-shot + finetuned
+2026-07-23: direct follow-up to the finetuned result above. The two checkpoints fail in
+near-opposite ways — zero-shot cleans gutter/SFX halos well but carves real art (over-del
+1.58%/2.58%); finetuned protects art well but leaves halos (under-del 10.61%/10.85%). Goal:
+a deterministic combiner that takes finetuned's output as the safe base and admits zero-shot's
+extra deletions only where they can't be real content, same philosophy as `--reclaim-islands`
+(cheap, deterministic, composable). Full plan: `.tmp/notes/manual_clean_quality_plan.md`.
+
+**Design** (`src/ensemble_refine.py`): label connected components of finetuned's KEEP mask; for
+each component, compute the fraction of its pixels zero-shot marks DELETE. If that fraction
+clears a threshold `F` and the component's area is under a cap `A` (small/medium blobs like
+halos, not whole panels), zero-shot's deletions are applied inside that component. The area cap
+is what protects large flat art regions even where zero-shot disagrees. A distance-gated
+alternative (accept zero-shot-only deletions past some distance from agreed-keep territory) was
+also implemented and screened — consistently 3-4x worse on over-del at every radius tried
+(0/8/16px), confirmed by a synthetic adversarial test beforehand: when zero-shot disagrees with
+100% of a region, no nearby agreed-keep anchor exists to protect it. Component gating was the
+only viable rule going forward.
+
+**First real bug, found by direct inspection (`gt001` y=65037)**: raw 8-connectivity fused a
+33k-area SFX halo into the 474k-area panel directly above it (finetuned's own keep mask has no
+gap between them) — a merged component this large fails any area cap outright, and the merge
+also dilutes the zero-shot-disagreement fraction. **Fix**: erode the keep mask before labeling
+(breaks weak thin bridges), then dilate a qualifying eroded component back — intersected with
+the original keep mask — before the pixel swap, recovering close to the true pre-erosion extent.
+Verified on this band: 0px changed (no fix) → ~26,000px changed (halo fully wiped, panel intact,
+matching zero-shot's cleanup) after the erosion fix.
+
+**Second bug, found the same way (`gt002` y=96627, discovered during the full 2-chapter eval,
+not the 5-band screen)**: a steam/exertion effect near a character's head is fused with their
+real T-shirt. At erode=0 this is one 73,718px component — correctly over the area cap, protected.
+At erode=15 (the combo the screen had picked) it splits into fragments, and the fragment
+containing the fused effect+shirt showed an *eroded* stats area of 44,507px — under the 60,000
+cap — while its true dilated-back extent (the same computation already used for the pixel swap,
+just not for the area check) was 62,120px, over the cap. **`ensemble_component()` was checking
+the area cap against the shrunken eroded-label area, not the true extent** — an artifact of
+erosion, not a real property of the region. This deleted real clothing, causing a measured
+regression on chapter 002 (finetuned 11.6203% → ensemble 11.6768%, +0.0565pp worse). Read at
+first as a fundamental "erosion radius is case-dependent" limitation; direct inspection instead
+found a plain measurement bug. **Fix**: compute the dilated-back true extent for every component
+(not just qualifying ones) and check the area cap against that, not the eroded stats area —
+makes the cap erosion-radius-invariant. Verified directly on both decisive bands after the fix:
+`gt001` y=65037 halo still swaps (~20,000px, mechanism intact); `gt002` y=96627 false positive
+collapses to a 708px residual.
+
+**Evaluation (GT chapters 001/002, two-directional, post-fix):**
+
+| | over-del | under-del | total error |
+|---|---|---|---|
+| ch001 finetuned only | 0.37% | 10.61% | 10.98% |
+| ch001 zero-shot only | 1.58% | 9.73% | 11.31% |
+| **ch001 ensemble (component f=0.6 a=60000 erode=15)** | **0.37%** | **10.59%** | **10.97%** |
+| ch002 finetuned only | 0.77% | 10.85% | 11.62% |
+| ch002 zero-shot only | 2.58% | 9.48% | 12.06% |
+| **ch002 ensemble (component f=0.6 a=60000 erode=15)** | **0.77%** | **10.84%** | **11.61%** |
+
+Combined (pixel-weighted across both chapters): finetuned baseline total 11.2524% → ensemble
+11.2382%, a real net improvement of -0.0142pp. Both chapters individually improve or hold; over-
+del cost stays negligible (+0.0045pp combined) — no art-damage regression. This is a genuine,
+if modest, win: strictly better than either checkpoint alone on the metric that matters, not
+just a compromise between their failure modes.
+
+**Honest verdict against the plan's own success criteria**: the over-del target (≤ finetuned's
+0.37%/0.77%) is essentially met (0.37%/0.77%, within noise). The under-del target (≤ zero-shot's
++0.5pp, i.e. ≤~10.2%/10.0%) is **not met** — the ensemble closes only about half the gap between
+finetuned and zero-shot's under-del (10.59%/10.84% vs the ~10.2%/10.0% target), because the area
+cap that correctly protects large fused content (see the ch002 bug above) also means many
+smaller-but-still-substantial halo/gutter regions that don't cleanly separate from art via
+erosion never get admitted for cleanup. **Partial result, real and safe, not sufficient alone**
+to reach manual-clean quality — the remaining halo gap is architectural to this rule (connectivity
++ area-cap can't distinguish "safe to clean" from "adjacent to protected content" any better than
+the erosion radius allows), not a further parameter-tuning problem. Next candidate per the plan:
+Phase B (checkpoint-sweep of the original finetune run, in progress) — does an intermediate
+checkpoint dominate the tradeoff on its own, either as a production candidate or fed back into
+this same ensemble as a stronger "finetuned" input.
+
+Artifacts: `src/ensemble_refine.py` (tracked, commits 4.22.2 initial + 4.22.3 area-cap fix),
+`.tmp/ensemble_refine/` previews, `.tmp/notes/manual_clean_quality_plan.md` (full execution log).
+**Production recommendation unchanged: `10.0-baseline` + `--reclaim-islands`.**
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
