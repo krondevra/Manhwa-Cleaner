@@ -276,8 +276,15 @@ def main() -> None:
             running_loss = 0.0
 
         if step % args.save_every == 0 or step == args.steps:
-            torch.save(add_module_prefix(model.state_dict()), out_path)
-            print(f"saved checkpoint: {out_path} (step {step})")
+            state = add_module_prefix(model.state_dict())
+            torch.save(state, out_path)
+            # Also save a per-step-numbered copy so a checkpoint sweep is possible
+            # afterward -- the original 4000-step run overwrote the same --out path
+            # every save, destroying all 15 intermediate checkpoints (see
+            # .tmp/notes/cascadepsp_finetune_next_steps_thinking.md option 1).
+            stepped_path = out_path.with_suffix(f".step{step}{out_path.suffix}")
+            torch.save(state, stepped_path)
+            print(f"saved checkpoint: {out_path} and {stepped_path} (step {step})")
 
     print(f"done. total time: {(time.time()-t_start)/60:.1f}min for {args.steps} steps")
     print(f"final strata pick counts: {train_ds.counts}")
