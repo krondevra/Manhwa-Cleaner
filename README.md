@@ -18,6 +18,14 @@ own. The project moved through:
    manual Photoshop workflow this project automates)
 4. **production tooling** — dataset prep, heuristic evaluation without ground
    truth, hard-case mining
+5. **learned refinement (experimental)** — CascadePSP (Cheng et al.), a
+   class-agnostic refinement network, finetuned on Pepper & Carrot pairs to
+   correct SmallUNet's raw output. Best net pixel-error of any tested config
+   against real ground truth, but trades some gutter/SFX cleanup quality for
+   fixing over-deletion of real artwork — not yet adopted for production.
+
+**Current production**: `data/models/10.0-baseline.pt` + `src/ml_cleaner.py
+process ... --reclaim-islands`.
 
 Full history of that iteration — including abandoned approaches and why they
 were abandoned — is in the git log (`git log --oneline`) and, curated,
@@ -66,6 +74,18 @@ legitimately differs (frame/bubble outline kept, SFX/bubble/shape marks
 kept). `src/ml_cleaner.py train` reads
 `data/dataset_split/train` and `data/dataset_split/val` by default; see
 `docs/readme.md` for selecting a subset of variants.
+
+`data/dataset_split/` and `data/dataset_split_scaled/` aren't kept on disk
+between sessions (regenerable, not required for inference) — regenerate from
+the PepperNCarrotDataset repo's `src/tools/cut_dataset.py` before training.
+
+## Checkpoints and releases
+Small checkpoints (SmallUNet, ~14MB each) are tracked directly in
+`data/models/`. Larger third-party-architecture checkpoints (e.g. the
+CascadePSP finetune above, ~260MB) exceed GitHub's 100MB per-file limit and
+are distributed as [GitHub Release](../../releases) assets instead — download
+and place under `data/models/` manually if needed;
+`data/models/cascadepsp-*` is gitignored for this reason.
 
 ## License
 

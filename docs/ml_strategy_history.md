@@ -944,7 +944,7 @@ generation, stratified sampling rationale, hardware/compat findings); this entry
 result. **Never trained on real manhwa** — P&C only, per the clarified policy above; manual-
 reference chapters 001/002 used only as held-out evaluation, same as every other checkpoint.
 
-**Setup**: cloned CascadePSP's own training code (`.tmp/CascadePSP/`, third-party, not committed;
+**Setup**: cloned CascadePSP's own training code (`data/CascadePSP/`, third-party, not committed;
 one compat patch needed — `models/sobel_op.py` hardcoded `.cuda()` on its Sobel kernels, removed).
 Exported 1255 train / 140 val (image, clean keep-mask) pairs (`src/export_cascadepsp_pairs.py`)
 from `data/dataset_split_scaled/` — only the variants `10.0-baseline` itself trains on
