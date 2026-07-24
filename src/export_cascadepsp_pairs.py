@@ -57,6 +57,20 @@ OUT_DIR = REPO_ROOT / "data" / "refinement_pairs"
 # actually presents at inference.
 VARIANTS = [v for v in BASE_VARIANTS if v != "initial"] + OVERLAY_VARIANTS
 
+# framed_speechbubles_sfx_w (real-colored Korean SFX overlay, built for the
+# SmallUNet model 14.0 experiment) is deliberately NOT in BASE_VARIANTS/
+# OVERLAY_VARIANTS (14.0's result was mixed, not adopted), which means the
+# CascadePSP finetune has NEVER seen a single composited SFX pixel of any
+# kind -- not the crisp default style, not blurred. Opt-in via --include-sfx
+# to test whether exposing the refiner (not the primary trunk) to real SFX
+# content changes its behavior on SFX/halo regions. Blur-style SFX assets
+# still cannot be included even here -- PepperNCarrotDataset's own
+# _sfx_colored_files() excludes them because the outline-deletion sidecar
+# mask assumes a hard glyph boundary a Gaussian blur destroys -- so this
+# tests "sees crisp SFX at all" only, not the halo-specific soft-boundary
+# case from the original hypothesis.
+SFX_VARIANT = "framed_speechbubles_sfx_w"
+
 LOCAL_CONTRAST_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
 LOCAL_CONTRAST_THRESHOLD = 30  # matches ml_cleaner.py's GuidanceParams default
 MIN_LOW_TEXTURE_AREA = 224 * 224 // 2  # generous enough that a 224 crop centered here stays mostly flat
@@ -119,12 +133,12 @@ def export_page(rgb_path: Path, cleaned_path: Path, out_id: str, out_dir: Path) 
     return len(low_texture), len(boundary)
 
 
-def export_split(split: str, episode_filter: str | None) -> None:
+def export_split(split: str, episode_filter: str | None, variants: list[str], out_dir_root: Path) -> None:
     split_dir = DATASET_SPLIT_SCALED / split
     if not split_dir.is_dir():
         print(f"skip: {split_dir} not found")
         return
-    out_dir = OUT_DIR / split
+    out_dir = out_dir_root / split
     out_dir.mkdir(parents=True, exist_ok=True)
 
     episodes = sorted(d for d in split_dir.iterdir() if d.is_dir())
@@ -140,7 +154,7 @@ def export_split(split: str, episode_filter: str | None) -> None:
     per_variant_pages: dict[str, int] = {}
 
     for ep_dir in episodes:
-        for variant in VARIANTS:
+        for variant in variants:
             src_dir = ep_dir / variant
             cleaned_dir = ep_dir / f"{variant}_cleaned"
             if not src_dir.is_dir() or not cleaned_dir.is_dir():
@@ -167,11 +181,20 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--split", choices=["train", "val", "both"], default="both")
     ap.add_argument("--episode", default=None, help="substring filter, e.g. ep01 (for smoke-testing one episode first)")
+    ap.add_argument("--include-sfx", action="store_true",
+                     help=f"also export the {SFX_VARIANT!r} variant (see module docstring "
+                     "comment above SFX_VARIANT for why this is opt-in, not default)")
+    ap.add_argument("--out-dir", type=Path, default=OUT_DIR,
+                     help="output root (default: data/refinement_pairs); use a different "
+                     "path with --include-sfx to keep the original no-SFX export intact "
+                     "for comparison")
     args = ap.parse_args()
 
+    variants = list(VARIANTS) + ([SFX_VARIANT] if args.include_sfx else [])
+    print(f"variants: {variants}")
     splits = ["train", "val"] if args.split == "both" else [args.split]
     for split in splits:
-        export_split(split, args.episode)
+        export_split(split, args.episode, variants, args.out_dir)
 
 
 if __name__ == "__main__":

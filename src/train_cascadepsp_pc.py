@@ -206,6 +206,16 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=REPO_ROOT / "data/models/cascadepsp-pc-finetune.pth")
     ap.add_argument("--pilot-out", type=Path, default=None,
                      help="if set, save/overwrite here instead of --out (keeps pilot runs out of the real checkpoint slot)")
+    ap.add_argument("--init-weights", type=Path, default=None,
+                     help="continue training from this checkpoint instead of the stock "
+                     "pretrained CascadePSP release weights (e.g. a prior finetune's "
+                     "checkpoint, to test a data/hyperparameter change with a short run "
+                     "instead of a full from-pretrained retrain)")
+    ap.add_argument("--data-dir", type=Path, default=DATA_DIR,
+                     help="training pairs root (default: data/refinement_pairs); point "
+                     "at a different export (e.g. one from export_cascadepsp_pairs.py "
+                     "--include-sfx --out-dir ...) to test a data-composition change "
+                     "without overwriting the original export")
     ap.add_argument("--seed", type=int, default=7)
     args = ap.parse_args()
 
@@ -217,14 +227,19 @@ def main() -> None:
     print(f"device: {device}")
 
     model = PSPNet(sizes=(1, 2, 3, 6), psp_size=2048, deep_features_size=1024, backend="resnet50")
-    print("loading stock pretrained CascadePSP weights...")
-    load_pretrained_weights(model)
+    if args.init_weights is not None:
+        print(f"loading init weights from {args.init_weights} (continuation run)...")
+        state = torch.load(str(args.init_weights), map_location="cpu", weights_only=False)
+        model.load_state_dict(strip_module_prefix(state))
+    else:
+        print("loading stock pretrained CascadePSP weights...")
+        load_pretrained_weights(model)
     model = model.to(device).train()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     sobel = SobelComputer()
     sobel.sobel = sobel.sobel.to(device)
 
-    train_ds = StratifiedRefinementDataset(DATA_DIR / "train", tuple(args.strata_ratios))
+    train_ds = StratifiedRefinementDataset(args.data_dir / "train", tuple(args.strata_ratios))
     print(f"train pairs: {len(train_ds)}")
     loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
                          num_workers=args.workers, drop_last=True)
