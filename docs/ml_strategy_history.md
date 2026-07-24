@@ -1124,6 +1124,81 @@ Artifacts: `src/ensemble_refine.py` (tracked, commits 4.22.2 initial + 4.22.3 ar
 `.tmp/ensemble_refine/` previews, `.tmp/notes/manual_clean_quality_plan.md` (full execution log).
 **Production recommendation unchanged: `10.0-baseline` + `--reclaim-islands`.**
 
+### RESULT (informative, no actionable improvement — training is not reproducible here) — CascadePSP finetune checkpoint-sweep
+2026-07-23/24: direct follow-up to the finetuned result's own open question ("sweep 2-3
+checkpoints... to find the best generalizing point rather than assuming later=better"). The
+original 4000-step finetune only kept its final checkpoint (a real bug — `train_cascadepsp_pc.py`
+overwrote the same `--out` path at every save, discovered during review; **fixed in commit 4.22.1**
+to also write `{out}.step{N}.pth` at every `--save-every`, permanent for all future runs of this
+script). Since the original run's 15 intermediate checkpoints were unrecoverable, answering the
+open question required a full 4000-step retrain — identical config/seed (seed 7, batch 2,
+workers 0, lr 1e-5, ratios 0.3/0.4/0.3), `--save-every 500`, ~19.9h wall-clock (slower than the
+original 14.1h due to CPU contention with Phase A's concurrent evals) — then evaluating all 8
+resulting checkpoints (500/1000/.../4000) against both GT chapters (`src/probe_cascadepsp.py gt
+--weights <ckpt>`), ~1-1.5h/checkpoint, ~10h total.
+
+**Full two-directional GT results, combined across both chapters (pixel-weighted):**
+
+| checkpoint | over-del | under-del | total error |
+|---|---|---|---|
+| step 500 | 0.64% | 12.15% | 12.80% |
+| step 1000 | 0.60% | 11.15% | 11.76% |
+| step 1500 | 1.84% | 10.40% | 12.25% |
+| **step 2000** | **9.43%** | 9.75% | **19.18%** |
+| step 2500 | 1.07% | 10.04% | 11.11% |
+| step 3000 | 1.56% | 11.00% | 12.56% |
+| step 3500 | 0.58% | 12.37% | 12.95% |
+| **step 4000 (this sweep run)** | 0.68% | 10.28% | **10.96%** |
+| step 4000 (original run, for comparison) | 0.54% | 10.71% | 11.25% |
+
+**The trajectory is genuinely non-monotonic, not a smooth curve with a findable sweet spot.**
+Step 2000 is a severe, reproducible outlier on both chapters independently (over-del 8.6-10.0%,
+near-indiscriminate over-deletion) — checked and ruled out as a data artifact: the checkpoint
+file size matches its neighbors exactly, loaded without warning, and the training loss logged at
+that exact step (0.1851) was completely unremarkable, in the same range as every neighboring
+step. **The synthetic online-perturbation training loss this project trains against does not
+track this real-image failure mode** — a checkpoint can sit in a genuinely bad transient state
+for real-domain behavior while its aggregate training loss looks fine, a new instance of this
+project's recurring "the metric you're optimizing isn't the metric that matters" lesson.
+
+**The critical, reframing finding**: this sweep's own step 4000 (10.96% combined) beats the
+*original* run's step 4000 (11.25%) — two runs with identical seed and config produced
+measurably different final checkpoints. Loss trajectories matched closely early on (e.g. step 500
+loss agreed to 4 decimal places between runs), but by step 4000 real-image GT behavior had
+diverged by more than most of the checkpoint-to-checkpoint differences found *within* either
+single run. **GPU training here is not bit-reproducible even with a fixed seed** — plausible
+sources are non-deterministic cuDNN/ROCm reduction kernels compounding over 4000 steps, not
+verified further (out of scope for what this sweep was trying to answer). This means the earlier
+within-run appearance of "step 2500 beats step 4000" (when step 2500 was compared only against
+the *original* run's step 4000, before this run's own step 4000 had been evaluated) is better
+explained as ordinary run-to-run training noise than as a genuine, exploitable mid-training
+optimum — confirmed by the fact that **within this single run, step 4000 (the final checkpoint)
+is in fact the best of all 8 points evaluated**, i.e. "later is better" held throughout this run;
+there was no hidden earlier sweet spot to find once the full trajectory was mapped.
+
+**Honest verdict**: the entire checkpoint-selection question is answered, but the answer carries
+no actionable improvement. The ~0.1-0.3pp differences observed between candidate checkpoints —
+across 8 checkpoints in a single run, and between two separate "step 4000" runs of the identical
+recipe — are of the same order of magnitude as each other, meaning they're most parsimoniously
+explained as training noise, not a discoverable tradeoff to exploit by picking the right step.
+The only way to reliably do meaningfully better would be running multiple full trainings and
+selecting the best by GT eval each time — a full ~14-20h + ~1.5h-eval cost per additional attempt,
+poor return for gains this small. **No checkpoint change is recommended.** Total cost of this
+investigation (original 14.1h finetune + this sweep's 19.9h retrain + ~10h of 8-checkpoint GT
+eval, ~44h combined) for a verified-but-marginal (~0.1-0.3pp) result and one permanent, genuinely
+useful tooling fix (checkpoint saves no longer silently overwrite each other) — flagged plainly
+as a poor cost/signal ratio in hindsight, not spun as a win. **No further checkpoint-selection or
+ensemble-parameter tuning is planned without new evidence** — a materially better result, if
+pursued, would need to address the training data itself (see Phase C in
+`.tmp/notes/manual_clean_quality_plan.md` — not started, requires explicit go-ahead given its own
+much larger cost and unverified preconditions).
+
+Artifacts: `src/train_cascadepsp_pc.py` (4.22.1 fix, tracked), `.tmp/run_checkpoint_sweep_eval.sh`,
+`data/models/cascadepsp-pc-finetune-1.0-sweep.step{500,1000,...,4000}.pth` (gitignored, ~271MB
+each, reproducible from the script + P&C data + seed 7), `.tmp/sweep_step{N}/` previews,
+`.tmp/notes/manual_clean_quality_plan.md` (full execution log). **Production recommendation
+unchanged: `10.0-baseline` + `--reclaim-islands`.**
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
@@ -1172,3 +1247,14 @@ Artifacts: `src/ensemble_refine.py` (tracked, commits 4.22.2 initial + 4.22.3 ar
    pixel-ground-truth evaluation from here on should measure both
    `red & gt_white` (content lost) and `white & gt_red` (background kept)
    against the same islands-cleaned ground truth, not just one.
+9. **A fixed seed does not guarantee a reproducible GPU training run.**
+   The CascadePSP checkpoint-sweep retrain (see above) used an identical
+   seed/config to the original 4000-step finetune and matched its loss
+   trajectory closely early on, but the two runs' final checkpoints
+   diverged enough in real-image GT behavior (~0.3pp total error) to
+   change which one looked "better" — a difference of the same order of
+   magnitude as the checkpoint-to-checkpoint variation being investigated
+   within a single run. Before attributing a small (<0.5pp) difference
+   between two training runs to a real cause (a hyperparameter, a data
+   change, a "better" checkpoint), check whether it's within this
+   run-to-run noise floor first — it may not be signal at all.
