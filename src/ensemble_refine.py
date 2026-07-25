@@ -92,16 +92,16 @@ def pct(n: int, d: int) -> str:
 
 
 class EnsembleProber:
-    def __init__(self):
-        self.device = torch.device("cpu")
+    def __init__(self, device: str = "cpu"):
+        self.device = torch.device(device)
         self.model, self.config = load_model(MODEL, self.device)
         self.threshold = float(self.config.get("threshold", 0.5))
         self.gp = GuidanceParams(
             threshold_value=int(self.config.get("threshold_value", 30)),
             morph_radius=int(self.config.get("morph_radius", 2)),
         )
-        self.refiner_zs = sr.Refiner(device="cpu")
-        self.refiner_ft = sr.Refiner(device="cpu")
+        self.refiner_zs = sr.Refiner(device=device)
+        self.refiner_ft = sr.Refiner(device=device)
         state = torch.load(str(FINETUNE_WEIGHTS), map_location="cpu", weights_only=False)
         stripped = {(k[7:] if k.startswith("module.") else k): v for k, v in state.items()}
         self.refiner_ft.model.load_state_dict(stripped)
@@ -279,9 +279,9 @@ def run_screen() -> None:
     print(f"\nPreviews saved to {OUT}/ -- inspect visually before promoting a combo to 'full'.")
 
 
-def run_full(rule: str, frac: float, area: int | None, radius: int, erode: int) -> None:
+def run_full(rule: str, frac: float, area: int | None, radius: int, erode: int, device: str = "cpu") -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    prober = EnsembleProber()
+    prober = EnsembleProber(device=device)
     combo_desc = f"{rule}_f{frac}_a{area}_e{erode}" if rule == "component" else f"{rule}_r{radius}"
     print(f"== full GT eval, combo={combo_desc} ==")
 
@@ -356,13 +356,16 @@ def main() -> None:
                     "original raw-connectivity behavior -- found necessary by direct inspection, "
                     "see ensemble_component's docstring)")
     ap.add_argument("--radius", type=int, default=8, help="distance rule: px radius from agreed-keep content")
+    ap.add_argument("--device", default="cpu", choices=["cpu", "cuda"],
+                    help="inference device (default: cpu; cuda needs HSA_OVERRIDE_GFX_VERSION "
+                    "set on this machine, same as train_cascadepsp_pc.py)")
     args = ap.parse_args()
 
     area = None if args.area == 0 else args.area
     if args.mode == "screen":
         run_screen()
     else:
-        run_full(args.rule, args.frac, area, args.radius, args.erode)
+        run_full(args.rule, args.frac, area, args.radius, args.erode, device=args.device)
 
 
 if __name__ == "__main__":

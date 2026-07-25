@@ -78,15 +78,15 @@ def pct(n: int, d: int) -> str:
 
 
 class Prober:
-    def __init__(self, fast: bool = False, weights: Path | None = None):
-        self.device = torch.device("cpu")
+    def __init__(self, fast: bool = False, weights: Path | None = None, device: str = "cpu"):
+        self.device = torch.device(device)
         self.model, self.config = load_model(MODEL, self.device)
         self.threshold = float(self.config.get("threshold", 0.5))
         self.gp = GuidanceParams(
             threshold_value=int(self.config.get("threshold_value", 30)),
             morph_radius=int(self.config.get("morph_radius", 2)),
         )
-        self.refiner = sr.Refiner(device="cpu")
+        self.refiner = sr.Refiner(device=device)
         if weights is not None:
             # Our finetune runner (train_cascadepsp_pc.py) saves checkpoints
             # with a 'module.' prefix (matching what nn.DataParallel would
@@ -239,6 +239,11 @@ def main() -> None:
     ap.add_argument("--weights", type=Path, default=None,
                     help="path to a finetuned checkpoint (e.g. from train_cascadepsp_pc.py) "
                     "instead of the stock pretrained CascadePSP release weights")
+    ap.add_argument("--device", default="cpu", choices=["cpu", "cuda"],
+                    help="inference device for both the SmallUNet base model and the "
+                    "CascadePSP refiner (default: cpu, ~1-1.5h/chapter observed; cuda "
+                    "untested as of this flag's addition -- needs HSA_OVERRIDE_GFX_VERSION "
+                    "set for this machine's iGPU, same as train_cascadepsp_pc.py)")
     ap.add_argument("--out-dir", type=Path, default=None,
                     help="override output dir (default: .tmp/cascadepsp_probe, or "
                     ".tmp/cascadepsp_probe_finetuned when --weights is set, so a "
@@ -250,7 +255,7 @@ def main() -> None:
         out_dir = OUT if args.weights is None else ROOT / ".tmp" / "cascadepsp_probe_finetuned"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    prober = Prober(fast=args.fast, weights=args.weights)
+    prober = Prober(fast=args.fast, weights=args.weights, device=args.device)
     if args.set in ("clauds", "all"):
         run_clauds(prober, out_dir)
     if args.set in ("spots", "all"):
