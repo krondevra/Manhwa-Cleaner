@@ -1258,3 +1258,23 @@ unchanged: `10.0-baseline` + `--reclaim-islands`.**
    between two training runs to a real cause (a hyperparameter, a data
    change, a "better" checkpoint), check whether it's within this
    run-to-run noise floor first — it may not be signal at all.
+10. **CascadePSP's output depends on how much surrounding context the crop being
+    evaluated carries — a tightly-cropped window and the full `GT_BAND`-sized band
+    `run_gt()` actually uses are NOT interchangeable, even with identical weights and
+    device.** Found 2026-07-25 while investigating why a fresh comparison image didn't
+    match an older one on the same crop/checkpoint: CPU vs GPU inference was verified
+    bit-identical (0px difference across the base model, zero-shot, and finetuned
+    refiner — device is not the risk here), but a small `MARGIN`-padded window
+    (~3000 rows) around just the region of interest gave CascadePSP a different global
+    downsampled context than the full ~4600-row `GT_BAND`-sized band `run_gt()` computes
+    inference on before cropping the interesting region out — producing genuinely
+    different segmentation decisions (2.8% of pixels differed on one test crop, not
+    subtle noise). One direct consequence discovered the same night: an entire earlier
+    finding ("SFX-exposure training pilot fixes two real defects", based on tightly-
+    cropped before/after comparisons) had to be retracted once redone with correct
+    context — the true effect was ~27x smaller than what the undersized-window crops
+    showed, because most of the apparent "fix" was actually cross-training-run noise
+    (lesson #9) leaking in through a second, compounding methodology error. **Always
+    reproduce `run_gt()`'s exact band-and-margin construction (or run the real thing)
+    when building a comparison crop — never approximate it with a tighter window "close
+    enough" to the target region.**
