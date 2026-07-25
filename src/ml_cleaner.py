@@ -455,8 +455,34 @@ class DoubleConv(nn.Module):
         return self.net(x)
 
 
+class RefineHead(nn.Module):
+    """Self-contained coarse-then-refine second stage, trained from scratch on P&C only
+    (no third-party pretrained weights) -- see .claude/plans/snazzy-cuddling-creek.md.
+    Takes the coarse decoder's own full-resolution features (u1), its raw coarse logits
+    (a concrete signal to correct, not just re-derive), and a compressed, upsampled
+    summary of the bottleneck features (global context at 1/16 resolution) -- giving the
+    refine stage explicit access to both local detail and broader context the coarse
+    decoder's own receptive field doesn't carry to u1 directly. Deliberately applies
+    methodology lesson #10 (docs/ml_strategy_history.md): a refinement stage's output
+    depends on how much context it sees, not just its weights -- so the global-context
+    path here is a design choice, not an afterthought."""
+
+    def __init__(self, base: int, global_channels: int) -> None:
+        super().__init__()
+        self.global_compress = nn.Conv2d(global_channels, base * 2, 1)
+        self.refine = DoubleConv(base + 1 + base * 2, base)
+        self.out = nn.Conv2d(base, 1, 1)
+
+    def forward(self, u1: torch.Tensor, coarse_logits: torch.Tensor, mid: torch.Tensor) -> torch.Tensor:
+        global_ctx = self.global_compress(mid)
+        global_ctx = F.interpolate(global_ctx, size=u1.shape[-2:], mode="bilinear", align_corners=False)
+        x = torch.cat([u1, coarse_logits, global_ctx], dim=1)
+        return self.out(self.refine(x))
+
+
 class SmallUNet(nn.Module):
-    def __init__(self, in_channels: int = 7, base: int = 24, sdt_head: bool = False) -> None:
+    def __init__(self, in_channels: int = 7, base: int = 24, sdt_head: bool = False,
+                 refine_head: bool = False) -> None:
         super().__init__()
         self.down1 = DoubleConv(in_channels, base)
         self.down2 = DoubleConv(base, base * 2)
@@ -485,6 +511,9 @@ class SmallUNet(nn.Module):
         # Branches off the same full-resolution `u1` feature map already
         # feeding `self.out` -- encoder/decoder/skip structure untouched.
         self.out_sdt = nn.Conv2d(base, 1, 1) if sdt_head else None
+        # Self-contained coarse+refine second stage (same gating convention as
+        # out_sdt above) -- see RefineHead's own docstring.
+        self.refine_head = RefineHead(base, base * 12) if refine_head else None
 
     def forward(self, x: torch.Tensor):
         c1 = self.down1(x)
@@ -511,6 +540,9 @@ class SmallUNet(nn.Module):
 
         logits = self.out(u1)
         sdt = self.out_sdt(u1) if self.out_sdt is not None else None
+        if self.refine_head is not None:
+            refined_logits = self.refine_head(u1, logits, m)
+            return logits, refined_logits, sdt
         return logits, sdt
 
     @staticmethod
@@ -1181,6 +1213,54 @@ def postprocess_delete_mask(delete_mask: np.ndarray, close_radius: int, open_rad
         k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (open_radius * 2 + 1, open_radius * 2 + 1))
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k, iterations=1)
     return mask.astype(bool)
+
+
+def synthesize_coarse_mask_perturbation(
+    keep_mask: np.ndarray,
+    rng: random.Random,
+    max_morph_radius: int = 12,
+    n_holes_range: tuple[int, int] = (0, 3),
+    hole_radius_range: tuple[int, int] = (4, 24),
+) -> np.ndarray:
+    """Corrupt a real ground-truth keep-mask (True=content, False=background) to look
+    like a plausible coarse-model mistake -- own from-scratch implementation of the same
+    idea CascadePSP's own training uses to teach a refinement stage without needing real
+    coarse-model output for every training example (see
+    data/CascadePSP/util/boundary_modification.py's modify_boundary, read and understood
+    during the CascadePSP finetune work -- this reimplements the underlying algorithm
+    idea from scratch, not their code, for the self-contained RefineHead training in
+    .claude/plans/snazzy-cuddling-creek.md).
+
+    Applies, in random combination: (1) a random erode/dilate to simulate boundary
+    imprecision (the clauds defect's actual shape), (2) a small number of random
+    elliptical "bites" flipped either direction to simulate isolated false-positive/
+    false-negative blobs (the keep->del/del->keep flip patterns this project's own GT
+    evaluations have measured throughout its history)."""
+    out = keep_mask.copy()
+    h, w = out.shape
+
+    radius = rng.randint(1, max_morph_radius)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (radius * 2 + 1, radius * 2 + 1))
+    out_u8 = out.astype(np.uint8)
+    if rng.random() < 0.5:
+        out_u8 = cv2.erode(out_u8, k)
+    else:
+        out_u8 = cv2.dilate(out_u8, k)
+    out = out_u8.astype(bool)
+
+    n_holes = rng.randint(*n_holes_range)
+    for _ in range(n_holes):
+        cx, cy = rng.randint(0, w - 1), rng.randint(0, h - 1)
+        r = rng.randint(*hole_radius_range)
+        blob = np.zeros((h, w), dtype=np.uint8)
+        cv2.ellipse(blob, (cx, cy), (r, r), 0, 0, 360, 1, -1)
+        blob = blob.astype(bool)
+        if rng.random() < 0.5:
+            out = out & ~blob  # flip keep->delete (a false-positive delete bite)
+        else:
+            out = out | blob  # flip delete->keep (a leftover-background blob)
+
+    return out
 
 
 def reclaim_landlocked_delete_islands(delete_mask: np.ndarray, connectivity: int = 8) -> np.ndarray:
