@@ -18,11 +18,13 @@ own. The project moved through:
    manual Photoshop workflow this project automates)
 4. **production tooling** — dataset prep, heuristic evaluation without ground
    truth, hard-case mining
-5. **learned refinement (experimental)** — CascadePSP (Cheng et al.), a
+5. **learned refinement (experimental, opt-in)** — CascadePSP (Cheng et al.), a
    class-agnostic refinement network, finetuned on Pepper & Carrot pairs to
    correct SmallUNet's raw output. Best net pixel-error of any tested config
    against real ground truth, but trades some gutter/SFX cleanup quality for
-   fixing over-deletion of real artwork — not yet adopted for production.
+   fixing over-deletion of real artwork. Available via `--cascadepsp-refine`
+   (`src/ml_cleaner.py process`/`process-folder`, needs `.venv-cascadepsp` —
+   see `docs/ml_strategy_history.md`) but not the production default.
 
 **Current production**: `data/models/10.0-baseline.pt` + `src/ml_cleaner.py
 process ... --reclaim-islands`.

@@ -1199,6 +1199,54 @@ each, reproducible from the script + P&C data + seed 7), `.tmp/sweep_step{N}/` p
 `.tmp/notes/manual_clean_quality_plan.md` (full execution log). **Production recommendation
 unchanged: `10.0-baseline` + `--reclaim-islands`.**
 
+### RESULT (SFX-exposure training pilot + GPU speed + first production integration point)
+2026-07-25: three threads from one overnight session, summarized here; full detail split across
+`.claude/plans/snazzy-cuddling-creek.md`, `.tmp/notes/cascadepsp_sfx_exposure_plan.md`, and
+`.tmp/notes/cascadepsp_production_integration_plan.md`.
+
+**GPU inference** (`--device cuda` added to `src/probe_cascadepsp.py`/`src/ensemble_refine.py`,
+commit 4.22.7): a real, substantial speedup nobody had tried — full-precision mode ~40-55min/chapter
+(~2-3x vs the CPU baseline's 60-120min), `fast=True` mode ~2-3min/chapter (~17x) for a small
+(~0.17pp) quality cost. **CPU vs GPU inference confirmed bit-identical** (0px difference across
+the base model, zero-shot, and finetuned refiner) — device choice changes speed only here, not
+segmentation decisions, unlike training (see methodology lesson #9). Also found and documented
+(methodology lesson #10): CascadePSP's output depends on how much surrounding context a crop
+carries, not just its weights — a small window and the full `GT_BAND`-sized band `run_gt()`
+actually uses are not interchangeable.
+
+**SFX-exposure training pilot**: the CascadePSP finetune had never seen a single composited SFX
+pixel during training (crisp or blurred) — a real, previously-unnoticed gap. Two bounded
+continuation runs (400 steps each, from the checkpoint-sweep's step 4000) tested whether closing
+that gap helps. Full two-chapter GT results, combined total error: sweep baseline 11.2508% →
+step400 11.1333% → step600 10.9666% (best) → step800 12.9245% (sharp reversal, stopped there per
+an explicit pre-agreed condition). **Step 600's aggregate win is not a clean one** — direct visual
+inspection (caught by the user on a side-by-side comparison image, confirmed by pixel diff) found
+it introduces a real, new, small-content-deletion defect (a motion/SFX mark near a character's
+sleeve, correctly kept by both the baseline and step400, incorrectly deleted by step600) that the
+aggregate metric doesn't penalize enough to show up. **Adopted step400 for production**, not the
+higher-scoring step600, specifically because of this — the smallest, most conservative change
+footprint from the baseline.
+
+**First production integration** (`--cascadepsp-refine` added to `ml_cleaner.py process`/
+`process-folder`, commit 4.22.9): opt-in flag, default off, applies CascadePSP last after all
+existing postprocessing (matches how every quality number here was ever measured), default
+checkpoint `cascadepsp-sfx-pilot.step400.pth`, default `fast=True`. A real bug was found and fixed
+during smoke testing (not just assumed correct): the first implementation ran CascadePSP on an
+entire chapter in one pass; every quality number in this project's history used banded processing
+instead, and the single-pass version broke exactly as methodology lesson #10 predicts — it
+restored a large blank gutter to "keep" that `--reclaim-islands` alone correctly deleted. Fixed by
+reproducing `run_gt()`'s exact banding inside the new integration code. Full GT validation of the
+integrated command (not just the standalone refiner in isolation) on both held-out chapters:
+within 0.01-0.04pp of the already-measured standalone numbers. End-to-end wall-clock through the
+actual `process` command: 3min1s / 2min17s per chapter.
+
+**Honest bottom line**: `--cascadepsp-refine` is now a real, working, validated opt-in option —
+not a research probe anymore. It is NOT a claim that it beats `10.0-baseline` + `--reclaim-islands`
+alone in every case; it's a slower alternative with a modest, real quality profile and its own
+known tradeoffs (small new-defect risk at the margin, as found above). **Production default
+unchanged: `10.0-baseline` + `--reclaim-islands`.** `--cascadepsp-refine` is available for anyone
+who wants to try the alternative.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
