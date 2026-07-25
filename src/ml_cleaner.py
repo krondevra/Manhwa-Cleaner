@@ -210,19 +210,25 @@ def resolve_chapter_input(value: str | Path, chapters_dir: Path = DEFAULT_CHAPTE
     return path
 
 
-def model_version_prefix(model_path: Path, islands: bool = False, frames: bool = False) -> str:
+def model_version_prefix(model_path: Path, islands: bool = False, frames: bool = False,
+                          cascadepsp: bool = False) -> str:
     """e.g. data/models/3.0.pt -> "v3.0-", so output filenames show which
     checkpoint produced them (075_result.png -> v3.0-075_result.png).
-    With islands=True (--reclaim-islands) and/or frames=True (--repair-frames),
-    inserts "-islands-"/"-frames-"/"-islandsframes-" so the postprocessing
-    configurations never collide on disk. Both flags together merge into ONE
-    hyphenated segment ("-islandsframes-", not "-islands-frames-") because
+    With islands=True (--reclaim-islands), frames=True (--repair-frames), and/or
+    cascadepsp=True (--cascadepsp-refine), inserts "-islands-"/"-frames-"/
+    "-cascadepsp-"/merged combinations so the postprocessing configurations never
+    collide on disk. All active flags together merge into ONE hyphenated segment
+    ("-islandsframescascadepsp-", not "-islands-frames-cascadepsp-") because
     compare_models_video.py's version-discovery regex only supports a single
     suffix segment."""
     version = model_path.stem
     if not version.lower().startswith("v"):
         version = f"v{version}"
-    suffix = f"{'islands' if islands else ''}{'frames' if frames else ''}"
+    suffix = (
+        f"{'islands' if islands else ''}"
+        f"{'frames' if frames else ''}"
+        f"{'cascadepsp' if cascadepsp else ''}"
+    )
     return f"{version}-{suffix}-" if suffix else f"{version}-"
 
 
@@ -1359,6 +1365,91 @@ def repair_frame_interiors(
     return fixed
 
 
+_cascadepsp_refiner_cache: dict[tuple[str, str], object] = {}
+
+# Must match src/probe_cascadepsp.py's GT_BAND/MARGIN exactly -- every quality
+# number this project has ever measured for CascadePSP refinement (the whole
+# CascadePSP section of docs/ml_strategy_history.md) was computed by processing
+# GT_BAND-row bands with MARGIN px of context padding on each side, never a
+# single whole-image pass. CascadePSP's cascade uses global downsampled context
+# that depends on input size (see docs/ml_strategy_history.md methodology
+# lesson #10) -- feeding it a full manhwa-length strip (tens of thousands of
+# rows) at once is a different, unvalidated regime and was found in practice to
+# incorrectly restore large blank gutter regions to "keep". Band it the same
+# way every GT evaluation did.
+CASCADEPSP_BAND = 4000
+CASCADEPSP_MARGIN = 300
+
+
+def apply_cascadepsp_refine(
+    rgb: np.ndarray,
+    delete_mask: np.ndarray,
+    weights_path: Path,
+    device: torch.device,
+    fast: bool,
+) -> np.ndarray:
+    """Refine a delete mask with CascadePSP (Cheng et al.), a class-agnostic
+    boundary-refinement network -- applied LAST, after all other postprocessing
+    (reclaim-islands, protect-borders, repair-frames), matching how every quality
+    number in docs/ml_strategy_history.md's CascadePSP sections was measured.
+
+    Processes the image in CASCADEPSP_BAND-row bands with CASCADEPSP_MARGIN px
+    of context on each side -- NOT a single whole-image call -- reproducing
+    src/probe_cascadepsp.py::run_gt()'s exact banding so real-page behavior
+    matches every number this project has already validated. Do not change
+    this to a single whole-image refine() call without re-validating against
+    the GT harness first; see docs/ml_strategy_history.md methodology lesson
+    #10 for why context size changes CascadePSP's actual decisions, not just
+    precision.
+
+    Requires the 'segmentation_refinement' package, installed only in
+    .venv-cascadepsp (not the default .venv this script normally runs under) --
+    imported lazily here so the default pipeline path never depends on it.
+
+    The constructed Refiner is cached module-wide by (weights_path, device) so
+    repeated calls (e.g. from process_folder_command's per-file loop) reuse the
+    same loaded model instead of reloading a ~270MB checkpoint per file."""
+    try:
+        import segmentation_refinement as sr
+    except ImportError as exc:
+        raise SystemExit(
+            "--cascadepsp-refine requires the 'segmentation_refinement' package, "
+            "installed in .venv-cascadepsp, not the default .venv -- rerun with "
+            "'.venv-cascadepsp/bin/python src/ml_cleaner.py ...'"
+        ) from exc
+
+    cache_key = (str(weights_path), str(device))
+    refiner = _cascadepsp_refiner_cache.get(cache_key)
+    if refiner is None:
+        refiner = sr.Refiner(device=str(device))
+        # train_cascadepsp_pc.py saves checkpoints with a 'module.' prefix
+        # (matching nn.DataParallel), the same convention Refiner itself
+        # expects and strips on its own stock-weights load path -- reuse that
+        # exact stripping logic so our finetuned checkpoints load the same way.
+        state = torch.load(str(weights_path), map_location="cpu", weights_only=False)
+        stripped = {(k[7:] if k.startswith("module.") else k): v for k, v in state.items()}
+        refiner.model.load_state_dict(stripped)
+        refiner.model.eval()
+        _cascadepsp_refiner_cache[cache_key] = refiner
+
+    H = rgb.shape[0]
+    refined = delete_mask.copy()
+    n_bands = (H + CASCADEPSP_BAND - 1) // CASCADEPSP_BAND
+    for b in range(n_bands):
+        y = b * CASCADEPSP_BAND
+        y0 = max(0, y - CASCADEPSP_MARGIN)
+        y1 = min(H, y + CASCADEPSP_BAND + CASCADEPSP_MARGIN)
+        band_rgb = rgb[y0:y1]
+        band_delete = delete_mask[y0:y1]
+        keep = np.where(band_delete, 0, 255).astype(np.uint8)
+        bgr = band_rgb[:, :, ::-1].copy()
+        soft = refiner.refine(bgr, keep, fast=fast, L=900)
+        band_refined = soft <= 127
+        ly, ly2 = y - y0, min(H, y + CASCADEPSP_BAND) - y0
+        refined[y:y + (ly2 - ly)] = band_refined[ly:ly2]
+    return refined
+
+
 def process_command(args: argparse.Namespace) -> None:
     device = choose_device(args.device)
     log(f"device: {device}")
@@ -1374,7 +1465,8 @@ def process_command(args: argparse.Namespace) -> None:
     input_path = resolve_chapter_input(args.input, DEFAULT_CHAPTERS_LONG_DIR)
     output_path = resolve_chapter_output(
         input_path, args.output, DEFAULT_CHAPTERS_RESULTS_DIR,
-        model_version_prefix(model_path, islands=args.reclaim_islands, frames=args.repair_frames),
+        model_version_prefix(model_path, islands=args.reclaim_islands, frames=args.repair_frames,
+                              cascadepsp=args.cascadepsp_refine),
     )
 
     if not input_path.exists():
@@ -1411,6 +1503,12 @@ def process_command(args: argparse.Namespace) -> None:
     if args.repair_frames:
         delete_mask = repair_frame_interiors(
             rgb, delete_mask, args.frame_darkness, args.frame_min_interior, args.frame_inset,
+        )
+
+    if args.cascadepsp_refine:
+        log(f"cascadepsp refine (weights={args.cascadepsp_weights}, fast={args.cascadepsp_fast})")
+        delete_mask = apply_cascadepsp_refine(
+            rgb, delete_mask, expand_path(args.cascadepsp_weights), device, args.cascadepsp_fast,
         )
 
     save_rgba(output_path, rgb, delete_mask)
@@ -1466,7 +1564,8 @@ def process_folder_command(args: argparse.Namespace) -> None:
         morph_radius=int(config.get("morph_radius", args.morph_radius)),
     )
 
-    prefix = model_version_prefix(model_path, islands=args.reclaim_islands, frames=args.repair_frames)
+    prefix = model_version_prefix(model_path, islands=args.reclaim_islands, frames=args.repair_frames,
+                                   cascadepsp=args.cascadepsp_refine)
 
     log(f"model: {model_path}")
     log(f"input: {input_dir}")
@@ -1504,6 +1603,11 @@ def process_folder_command(args: argparse.Namespace) -> None:
         if args.repair_frames:
             delete_mask = repair_frame_interiors(
                 rgb, delete_mask, args.frame_darkness, args.frame_min_interior, args.frame_inset,
+            )
+
+        if args.cascadepsp_refine:
+            delete_mask = apply_cascadepsp_refine(
+                rgb, delete_mask, expand_path(args.cascadepsp_weights), device, args.cascadepsp_fast,
             )
 
         save_rgba(output_path, rgb, delete_mask)
@@ -1573,6 +1677,39 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
         "--frame-inset", type=int, default=2,
         help="Erode each repaired interior by this many px so the frame stroke's own "
         "seam is never overwritten by --repair-frames",
+    )
+    parser.add_argument(
+        "--cascadepsp-refine",
+        action="store_true",
+        help="Refine the delete mask with CascadePSP (Cheng et al.), a class-agnostic "
+        "boundary-refinement network finetuned on Pepper & Carrot, applied LAST after "
+        "all other postprocessing above. Opt-in (off by default) -- a real but modest "
+        "quality profile with its own tradeoffs, not a strict improvement over "
+        "10.0-baseline + --reclaim-islands alone (see docs/ml_strategy_history.md, "
+        "search 'CascadePSP'). Requires 'segmentation_refinement', installed only in "
+        ".venv-cascadepsp -- rerun with that interpreter if this flag is used. Much "
+        "slower than the rest of this pipeline even with --cascadepsp-fast (default "
+        "on): budget a few minutes/chapter, not the instant turnaround of the rest.",
+    )
+    parser.add_argument(
+        "--cascadepsp-weights",
+        default="data/models/cascadepsp-sfx-pilot.step400.pth",
+        help="CascadePSP checkpoint for --cascadepsp-refine. Default is this project's "
+        "best-evaluated checkpoint as of 2026-07-25 (see "
+        ".tmp/notes/cascadepsp_production_integration_plan.md for why this one, not "
+        "the marginally-higher-aggregate-score step600 checkpoint -- step600 has a "
+        "real, visually-confirmed small-content-deletion defect this one doesn't).",
+    )
+    parser.add_argument(
+        "--cascadepsp-fast", action="store_true", default=True,
+        help="CascadePSP fast mode (single global refinement pass instead of the full "
+        "local+global cascade) -- ~17x faster, small (~0.17pp measured) quality cost. "
+        "On by default; pass --no-cascadepsp-fast for full-precision mode.",
+    )
+    parser.add_argument(
+        "--no-cascadepsp-fast", dest="cascadepsp_fast", action="store_false",
+        help="Use CascadePSP's full local+global cascade instead of fast mode -- best "
+        "measured quality, but ~40-55min/chapter instead of ~2-3min.",
     )
     parser.add_argument(
         "--sdt-fusion", action="store_true",
