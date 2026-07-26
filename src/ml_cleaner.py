@@ -1106,6 +1106,17 @@ def train_command(args: argparse.Namespace) -> None:
             save_checkpoint(model_path, model, config, args)
             log(f"saved best model: {model_path}")
 
+        if args.save_every_epoch:
+            # Opt-in, off by default -- exact no-op unless requested. Same fix already
+            # applied to train_cascadepsp_pc.py (commit 5.7.1): saving only the
+            # best-val checkpoint means every intermediate epoch is lost, and this
+            # project has since found (Phase B checkpoint-sweep, ml_strategy_history.md)
+            # that identical seed+config does not reproduce identical trained weights on
+            # this hardware -- multi-checkpoint comparison needs these to exist at all.
+            epoch_path = model_path.with_name(f"{model_path.stem}.epoch{epoch}{model_path.suffix}")
+            save_checkpoint(epoch_path, model, config, args)
+            log(f"saved epoch checkpoint: {epoch_path}")
+
     log(f"training finished in {(time.time() - t_all) / 60.0:.1f} min")
 
 
@@ -1934,6 +1945,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--amp", action="store_true")
     p_train.add_argument("--no-augment", action="store_true")
     p_train.add_argument("--resume", default="", help="Optional checkpoint to resume from")
+    p_train.add_argument(
+        "--save-every-epoch", action="store_true",
+        help="Also save a {model}.epochN{ext} checkpoint every epoch, alongside the "
+        "existing best-val-loss-only save. Off by default (exact no-op) -- opt in for "
+        "multi-checkpoint comparison given this project's confirmed non-reproducibility "
+        "finding (Phase B checkpoint-sweep, ml_strategy_history.md).",
+    )
     p_train.set_defaults(func=train_command)
 
     p_process = sub.add_parser("process", help="Clean one chapter")
