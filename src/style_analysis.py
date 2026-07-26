@@ -189,18 +189,38 @@ def extract_enclosed_holes(rgb: np.ndarray, min_area: float = MIN_SHAPE_AREA) ->
         if not holes.any():
             continue
         hole_contours, _ = cv2.findContours(holes, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        region = rgb[y:y + ch, x:x + cw]
         for c in hole_contours:
             stats = classify_and_measure(c, page_w, page_h, min_area=min_area)
-            if stats:
-                stats["contour"] = stats["contour"] + np.array([x, y])
-                stats["stroke_bbox"] = (int(x), int(y), int(cw), int(ch))
-                # border-thickness estimate for frame-classified strokes: median distance
-                # transform value within the stroke component *2 (radius -> width)
-                if stats["is_frame"]:
-                    dist = cv2.distanceTransform(comp, cv2.DIST_L2, 3)
-                    nz = dist[dist > 0]
-                    stats["border_thickness"] = float(np.median(nz) * 2) if nz.size else 0.0
-                out.append(stats)
+            if not stats:
+                continue
+            if stats["is_frame"]:
+                dist = cv2.distanceTransform(comp, cv2.DIST_L2, 3)
+                nz = dist[dist > 0]
+                stats["border_thickness"] = float(np.median(nz) * 2) if nz.size else 0.0
+            else:
+                # Real speech-bubble/text-box interiors are flat, light fills. Small
+                # enclosed ink loops elsewhere in the artwork (jewelry, clothing seams,
+                # decorative patterns, glyph counters in SFX/logo text) are NOT -- their
+                # interior is shaded/illustrated with real color variance. Confirmed
+                # visually (user-flagged QA finding, 2026-07-26): unfiltered, these
+                # false positives land squarely on character art (cuffs, collars,
+                # bracelets) in multiple previews. Filter on interior brightness/variance
+                # before accepting a shape into the bubble-family population.
+                mask_local = np.zeros((ch, cw), dtype=np.uint8)
+                cv2.drawContours(mask_local, [c], -1, 1, thickness=-1)
+                interior = region[mask_local.astype(bool)]
+                if interior.size == 0:
+                    continue
+                interior_mean = float(interior.mean())
+                interior_std = float(interior.std())
+                stats["interior_mean"] = interior_mean
+                stats["interior_std"] = interior_std
+                if interior_mean < 170.0 or interior_std > 35.0:
+                    continue  # not a flat light fill -> artwork detail, not a bubble/text box
+            stats["contour"] = stats["contour"] + np.array([x, y])
+            stats["stroke_bbox"] = (int(x), int(y), int(cw), int(ch))
+            out.append(stats)
     return out
 
 
