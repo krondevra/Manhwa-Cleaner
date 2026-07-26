@@ -1402,6 +1402,43 @@ consistent direction to correct via finetuning. **Production unchanged: `10.0-ba
 `--reclaim-islands`.** Full artifacts: `src/probe_toonout.py` (tracked), previews/log in
 `.tmp/toonout_probe/`, `.tmp/logs/toonout_gt.log`.
 
+## Generation 6 pivot (2026-07-26): third-party weights closed out, full self-synthesis begins
+
+With RefineHead (self-contained, model 18.0), three bubble-shape/curvature hypotheses, and both
+third-party refinement options exhausted, the user decided on a full pivot: no more P&C-composition
+tuning or third-party weights of any kind — a 100%-self-authored synthetic-data generator and
+staged curriculum training run instead (~2-3 day budget). Full plan:
+`.tmp/notes/synthetic_curriculum_plan.md`. Both third-party options investigated this session are
+closed out here as **deliberate, evidence-based rejections, not abandoned dead ends**:
+
+- **CascadePSP: rejected for licensing-provenance reasons, not quality.** Its P&C-finetuned
+  checkpoint (`cascadepsp-pc-finetune-1.0-sweep.pth`) posted the best net total pixel error of any
+  configuration ever tested on both real GT chapters (10.98%/11.62%, beating both production
+  13.02%/13.02% and its own zero-shot result 11.31%/12.06%) — a real, measured, positive result.
+  It was set aside only because its base ResNet50 weights' own upstream training-data licenses
+  (DUTS/ECSSD/FSS/MSRA_10K and similar mixed-license photo sets) were never independently audited
+  by the CascadePSP authors, which this project's now-narrowed-but-still-real third-party-weights
+  policy does not accept regardless of the wrapper repo's own license. The 16 checkpoint files
+  (~4.1GB) remain on disk, gitignored, kept rather than deleted, in case of future reference.
+- **ToonOut: rejected for both a genuine quality failure and the same licensing concern.**
+  Zero-shot GT eval was ~2.7x worse total error than production, failing in both over-deletion and
+  under-deletion simultaneously with no correctable direction (see the PROBE entry immediately
+  above) — a real quality rejection independent of licensing. Its base BiRefNet weights carry the
+  same class of unaudited-upstream-lineage concern as CascadePSP's ResNet50 base.
+
+Both efforts' code, probes, training scripts, and checkpoints-that-are-git-trackable remain fully
+reachable on the local `archive` branch (created at commit `130ad9f`, the last commit before this
+pivot) — nothing was deleted from git history, only some already-gitignored scratch directories
+were cleaned off disk (`data/CascadePSP`, `data/dataset_split_scaled`, `data/refinement_pairs`,
+`data/refinement_pairs_sfx`, `.venv-cascadepsp`, `.venv-toonout`, ~41.6GB).
+
+**Generation boundary**: the CascadePSP/ToonOut refinement era (originally generation 5,
+`5.1.1`-`5.7.12`) is folded into generation 4 on `main` (`4.16.1`-`4.22.12`, content-identical
+renumber; the original 5.x-numbered commits are preserved unchanged on the `archive` branch,
+tip `130ad9f`, which is why generation 5 does not otherwise appear on `main`) and closes at
+commit `4.22.12`. Generation 6 (fully self-synthesized curriculum, no P&C composition tuning, no
+third-party weights) begins at `6.1.1`. See `docs/decisions.md` for the versioning-scheme entry.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset

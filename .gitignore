@@ -16,8 +16,13 @@ data/models/2.0.json
 data/models/2.0.pt
 data/models/2.1.json
 data/models/2.1.pt
-# CascadePSP-family checkpoints (ResNet50-based, ~260MB+) exceed GitHub's 100MB
-# hard limit -- distribute these as GitHub Release assets instead, not git-tracked.
+# CascadePSP-family checkpoints (ResNet50-based, ~260MB+): excluded for two reasons, not
+# just size. (1) Exceed GitHub's 100MB hard limit -- would need distributing as Release
+# assets. (2) CascadePSP itself was deliberately rejected 2026-07-25/26 on licensing-
+# provenance grounds (its base weights' own upstream training data licenses were never
+# independently audited) despite genuinely good measured quality -- see
+# docs/ml_strategy_history.md "CascadePSP finetuned on P&C" and the generation-6 pivot
+# entry. Kept on disk (not deleted) but never git-tracked either way.
 # SmallUNet checkpoints (~14MB, everything else in data/models/) stay tracked as before.
 data/models/cascadepsp-*
 reports/
@@ -26,7 +31,7 @@ psd/
 __pycache__/
 *.pyc
 .venv/
-.venv-cascadepsp/
+.venv-*/
 /.backup
 /materials
 /output

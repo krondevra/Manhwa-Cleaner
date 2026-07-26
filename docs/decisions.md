@@ -32,10 +32,24 @@ separately in the first place).
 - **4**: further training-side levers on the "clauds" bubble-edge defect
   after capacity was ruled out — boundary-loss weighting (13.0), an
   auxiliary SDT head (15.0), scale-match (16.0/17.0), `--repair-frames`
-  inference postprocessing (`4.1.1`-`4.15.2`), extended through the
-  CascadePSP refinement era — real-manhwa policy clarification, zero-shot
-  probe, Pepper & Carrot finetune. Runs `4.1.1`-`4.15.2`, then `4.16.1`,
-  ongoing.
+  inference postprocessing, then the CascadePSP/ToonOut refinement era —
+  real-manhwa policy clarification, zero-shot probe, Pepper & Carrot
+  finetune, RefineHead self-contained architecture, ToonOut/BiRefNet probe.
+  Runs `4.1.1`-`4.15.2`, then `4.16.1`-`4.22.12`; closes at commit `4.22.12`
+  (2026-07-26) once both third-party-weight options were deliberately
+  rejected (licensing provenance, not quality — see
+  `ml_strategy_history.md` "Generation 6 pivot").
+- **6**: full pivot to a self-synthesized training pipeline — no P&C
+  composition tuning, no third-party pretrained weights of any kind. Starts
+  at `6.1.1`. Plan: `.tmp/notes/synthetic_curriculum_plan.md`.
+
+**Generation 5 is reserved and intentionally absent from `main`**: it is
+exclusively the `archive` branch's label for these same CascadePSP/ToonOut
+commits under their original numbers `5.1.1`-`5.7.12` (tip `130ad9f`,
+content-identical to `4.16.1`-`4.22.12` above) — preserved unchanged there
+while `main`'s copies were folded into generation 4 in the 2026-08-10
+consolidation (message + this section's own text renumbered; no code or
+checkpoint content touched).
 
 ### 2026-07-23 history rewrite
 23 commits made between `3.48.1` and the CascadePSP work had never been
