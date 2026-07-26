@@ -309,9 +309,17 @@ def seed_everything(seed: int) -> None:
 
 
 def choose_device(name: str) -> torch.device:
-    if name == "auto":
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    return torch.device(name)
+    device = torch.device(("cuda" if torch.cuda.is_available() else "cpu") if name == "auto" else name)
+    if device.type == "cuda":
+        # ROCm/MIOpen BatchNorm codegen bug on this hardware (gfx1151 iGPU) --
+        # miopenStatusUnknownError / "cannot compile inline asm" on some BatchNorm2d
+        # configurations. Established workaround this session (train_refine_head.py,
+        # probe_toonout.py, cascadepsp_finetune work): disable the cuDNN/MIOpen backend
+        # entirely. No-op on NVIDIA CUDA, but this project only ever runs on this one
+        # ROCm iGPU, so applying it unconditionally for any "cuda" device is correct
+        # here rather than over-engineering a vendor check.
+        torch.backends.cudnn.enabled = False
+    return device
 
 
 def read_rgb(path: Path) -> np.ndarray:
