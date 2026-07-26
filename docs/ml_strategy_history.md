@@ -1247,6 +1247,161 @@ known tradeoffs (small new-defect risk at the margin, as found above). **Product
 unchanged: `10.0-baseline` + `--reclaim-islands`.** `--cascadepsp-refine` is available for anyone
 who wants to try the alternative.
 
+### FAILED (severe, informative, 4th confirmation of a known mechanism) — model 18.0, self-contained coarse+refine head (RefineHead)
+
+2026-07-25: after deciding against any third-party pretrained weights — including CascadePSP
+itself, closing that entire thread (`.tmp/notes/cascadepsp_production_integration_plan.md` stays
+as an opt-in, non-default option; not pursued further) — this experiment tried to reproduce
+CascadePSP's coarse-then-refine idea *inside* `SmallUNet`, entirely from scratch, trained only on
+Pepper & Carrot. Plan: `.claude/plans/snazzy-cuddling-creek.md`.
+
+Added `RefineHead` (gated like `out_sdt`, zero-cost when disabled) taking the coarse decoder's own
+full-resolution features (`u1`), its raw coarse logits, and a compressed/upsampled bottleneck
+summary (global context) — a deliberate application of methodology lesson #10 (a refinement stage's
+output depends on how much context it sees). `SmallUNet.forward()` split into `coarse_forward()` +
+the existing heads so training could substitute a synthetic "coarse mistake" mask
+(`synthesize_coarse_mask_perturbation()` — own from-scratch erode/dilate/hole-punch implementation,
+not CascadePSP's `modify_boundary`) in place of the real coarse prediction. Stage A: warm-started
+from `10.0-baseline.pt`, coarse decoder frozen (confirmed via `load_state_dict(strict=False)` — the
+only missing keys were `refine_head.*`, 0.98% of total params trainable). Stage B: bounded 400-step
+pilot (`src/train_refine_head.py`), `boundary_patch_ratio=0.5` (deliberately biased toward
+boundaries — the whole point of the head), loss dropped steadily 0.72→0.29 with the usual bounce,
+no plateau — a clean mechanical result on its own.
+
+**Qualitative check on the established hard-case crops (`.tmp/notes/white_bg_regression_crops.md`,
+`sfx_regression_crops.md`, `src/probe_refine_head.py`, both heads run through the identical tiled
+`predict_delete_mask` + `--reclaim-islands` pipeline) told a different story: severe regression.**
+Across 5 windows, refined output flipped 70,430px keep→delete against only 33px the other way. Two
+of the three bubble/curved-outline crops show new, unambiguous scalloped red intrusions eating real
+bubble interior at the top curvature — reproducing the exact "clauds" defect shape `10.0-baseline`
+had already fixed at these instances (confirmed: the coarse-only output, which is numerically
+`10.0-baseline` unchanged, is clean at the same crops; only the refined output is damaged). SFX/flat
+crops were largely unaffected.
+
+**This is not a new failure mode — it's the 4th independent mechanism to hit the exact same
+convergent pattern already named in model 15.0's writeup**: capacity (`12.0`), boundary-loss
+reweighting (`13.0`), an auxiliary geometric task (`15.0`'s SDT head), and now a dedicated
+structural refine stage trained with boundary-biased sampling — every mechanism that concentrates
+extra gradient pressure or attention on boundary pixels measurably worsens this small network's
+boundary precision instead of improving it, regardless of how differently each mechanism is built.
+`RefineHead`'s architecture was specifically designed to sidestep the previous three mechanisms'
+own explanations (not a loss reweighting, not raw capacity, has real access to global context) and
+still reproduced the same failure — meaningful additional evidence for 15.0's structural hypothesis
+over a mechanism-specific one.
+
+**Recommendation: do not continue this design.** No Stage C (joint finetune) or self-distillation
+variant is likely to fix this — both would still concentrate training signal on boundary
+correction, the same property all four failed mechanisms share. `18.0-refinehead` is not tracked in
+`data/models/` (pilot checkpoint only, `.tmp/`, not committed) — nothing to revert in production.
+**Production unchanged: `10.0-baseline` + `--reclaim-islands`.**
+
+**Correction (2026-07-25, caught before acting on it): the paragraph above originally suggested
+`make_bubbles.py`'s ~8-10 static bubble-outline templates as "the most plausible remaining path" —
+this was stale language recycled from the pre-16.0 framing and is wrong. Model 16.0's own entry
+above already found `make_bubbles.py`'s templates are dead code, never consumed by any variant in
+the active training pipeline. A follow-up corpus check this session confirmed the real bubble-shape
+source (`process_speechbubbles.py`, hand-drawn shapes from Pepper & Carrot's own translator SVGs)
+isn't diversity-starved either: ~2,475 genuinely distinct outlines across the 39 episodes, no
+template/symbol reuse. Both diversity-count hypotheses are now ruled out. The next thing actually
+being checked (see `.claude/plans/snazzy-cuddling-creek.md`) is a distribution-shift question
+instead — not how many distinct shapes, but whether real manhwa bubbles present *tighter curvature*
+than anything in the P&C training range — a different, still-untested hypothesis.**
+
+### FAILED (informative, third bubble-shape hypothesis ruled out) — real/training curvature distribution check
+
+2026-07-25, same day: followed up on the distribution-shift question the correction above raised —
+not diversity count, but whether real manhwa bubbles present tighter curvature than the P&C training
+range covers. `src/probe_bubble_curvature.py`: rendered the isolated bubble/SFX-only SVG layer for 5
+bubble-dense P&C episodes (61 pages), measured discrete radius of curvature per oval-classified
+shape; found real bubble interiors the same way `repair_frame_interiors` finds enclosed frame/bubble
+interiors (flood-fill a dark-stroke component's padded bbox from its corner). Curvature measured in
+raw pixels at each side's native resolution (P&C ~2481px pages, real chapters ~690-720px),
+deliberately not scale-normalized — a CNN's kernels have a fixed absolute-pixel receptive field
+(model 16.0's own finding), so this is the comparison that matters.
+
+**Result: not supported.** P&C oval-bubble min-radius-of-curvature distribution (106 shapes):
+`[5,10,25,50,75,90]` percentiles = 7.4, 7.6, 10.9, 13.7, 16.6, 19.1px. The 3 already-documented,
+confirmed clauds defect instances (`.tmp/notes/clauds_regression_crops.md`, chapter `085.png`),
+ranked against that distribution: 11.4px (28th percentile), 14.2px (57th), 200.8px (100th — looser
+than every sampled P&C training bubble). **None of the 3 confirmed real-world failures are curvature
+outliers relative to training.** Verified by eye against the crop notes' own bubble-text descriptions
+before trusting the numbers, not just accepted at face value — a real methodology snag was caught and
+fixed in the process: the whole-page real-chapter aggregate also picks up rounded-corner panel frames
+as "enclosed holes" (no clean size/shape cutoff separates them from real bubbles — confirmed areas
+overlap directly), so that aggregate was excluded from the conclusion; the per-instance clauds
+measurement doesn't share this problem (small, single-bubble-focused crops) and was checked visually
+before use. Full writeup: `.tmp/notes/bubble_curvature_check.md`.
+
+**This is the third bubble-shape-related hypothesis ruled out this session** — template diversity
+(dead code), corpus diversity (not starved), and now curvature range (not exceeded). Combined with
+5 prior training-mechanism attempts on this defect (models 12.0, 13.0, 15.0, 18.0-refinehead, plus
+16.0/17.0's resolution-mismatch attempts), the shape/geometry angle looks exhausted for now — no
+further bubble-shape-related lever is currently identified as worth trying without new evidence.
+
+**Direction check-in, same day** (`.tmp/notes/full_auto_direction_2026-07-25.md`): with this angle
+exhausted, asked directly rather than guessing from earlier, partly-superseded statements. Result:
+still targeting full automation (not settling for an assisted workflow), the third-party-weights
+policy is **narrowed, not reopened wholesale** — open to a cleanly, fully auditable MIT/CC-licensed
+option specifically (ToonOut/`MatteoKartoon/BiRefNet`, MIT code+weights, CC BY 4.0 training data),
+not CascadePSP itself (its own upstream data licensing was never fully clarified) — bounded pilots
+only, and quality is now the explicit tiebreaker over speed/safety-conservatism (a shift from the
+original four concerns, where frame-damage risk was weighted alongside quality). Next proposed step:
+a cheap zero-shot ToonOut probe, not yet started.
+
+### PROBE (zero-shot, failed — severe, both directions) — ToonOut/BiRefNet
+
+2026-07-25, same day: the proposed next step above, executed. `src/probe_toonout.py` (mirrors
+`src/probe_cascadepsp.py`'s structure exactly — same `SPOT_YS`/`SPOT_H`/`MARGIN`/clauds-crop
+constants; `GT_BAND` reduced to 1200 for this model specifically, see below). Weights:
+`joelseytre/toonout` (MIT, finetuned on a CC-BY-4.0 1,228-image anime dataset) on
+`ZhengPeng7/BiRefNet`'s architecture (MIT code), loaded via `transformers
+.AutoModelForImageSegmentation` + a stripped-prefix `load_state_dict`. New isolated venv
+`.venv-toonout` (ROCm torch, same build as `.venv-cascadepsp`; hit and reused the same
+`torch.backends.cudnn.enabled = False` MIOpen workaround found earlier tonight). Zero-shot only —
+no P&C exposure, no finetuning, matching the bounded-pilot time budget for this session.
+
+**Methodology note**: ToonOut/BiRefNet resizes every input to a fixed 1024x1024 square regardless
+of aspect ratio (its own official demo does this) — an extreme distortion on a
+`GT_BAND=4000`-row x 690px-wide band (~6.7:1). A one-band sanity check at that scale was run
+first and showed a severe failure (see below); `GT_BAND` was reduced to 1200 (~2.6:1, closer to
+the aspect ratios `SPOT_H`/clauds-crop windows already use) for the real GT eval, to give the
+model a fairer test than the worst-case aspect ratio alone.
+
+**Result: severe, unambiguous failure, worse than production on both error axes at once.**
+
+| chapter | config | over-del | under-del | total err |
+|---|---|---|---|---|
+| 001 | islands | 0.79% | 12.37% | 13.16% |
+| 001 | +toonout | 9.33% | 26.13% | **35.47%** |
+| 002 | islands | 0.58% | 12.48% | 13.06% |
+| 002 | +toonout | 10.84% | 25.59% | **36.43%** |
+
+Roughly **2.7x worse total error than doing nothing**, and unlike CascadePSP's zero-shot result
+(which traded over-deletion for under-deletion in a legible, single-direction way — content
+destruction in exchange for gutter cleanup), ToonOut got worse on **both** axes simultaneously —
+not a rebalancing, just wrong. Confirmed visually before trusting the numbers (this session's own
+repeated lesson): one window had its entire dark-background panel deleted (real art, correctly
+kept by islands); another had its entire white gutter kept untouched; a third had an entire,
+clearly-legible speech bubble deleted outright. The 18-coordinate spot-check aggregate matches:
+1.24M px flipped delete→keep and 2.47M px flipped keep→delete across just 18 windows — over 30%
+of sampled pixels disagreeing with the islands baseline in one direction or the other, with no
+consistent bias.
+
+**Diagnosis**: not a mechanical bug (weights loaded cleanly, 0 missing/unexpected keys; inference
+ran without error) — a genuine domain mismatch. ToonOut/BiRefNet is trained for single-subject
+anime *character* cutouts (one salient figure against a background), not multi-panel comic pages
+with bubbles, gutters, and mixed full-color/line-art content. It has no coherent notion of
+"background vs. content" for this page structure at all — confirmed by the inconsistent failure
+direction (sometimes keeps everything, sometimes deletes everything, sometimes deletes only the
+one clearly-salient object and nothing else) rather than a single, correctable bias.
+
+**Recommendation: do not pursue a P&C finetune of ToonOut.** Unlike CascadePSP's zero-shot
+failure (a legible, single-direction bias — natural-image saliency priors over-trusting scenic
+low-texture regions — that finetuning plausibly could and did correct), this failure has no
+consistent direction to correct via finetuning. **Production unchanged: `10.0-baseline` +
+`--reclaim-islands`.** Full artifacts: `src/probe_toonout.py` (tracked), previews/log in
+`.tmp/toonout_probe/`, `.tmp/logs/toonout_gt.log`.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset

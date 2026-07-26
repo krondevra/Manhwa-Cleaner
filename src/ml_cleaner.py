@@ -515,7 +515,13 @@ class SmallUNet(nn.Module):
         # out_sdt above) -- see RefineHead's own docstring.
         self.refine_head = RefineHead(base, base * 12) if refine_head else None
 
-    def forward(self, x: torch.Tensor):
+    def coarse_forward(self, x: torch.Tensor):
+        """The original SmallUNet path (encoder -> decoder -> coarse logits),
+        exposed separately so training code for `refine_head` can substitute
+        its own coarse-mask input (e.g. a synthetically perturbed ground
+        truth, see synthesize_coarse_mask_perturbation) instead of this
+        model's own coarse prediction, while still reusing its real u1/mid
+        features. `forward()` below is just this plus the two optional heads."""
         c1 = self.down1(x)
         c2 = self.down2(self.pool(c1))
         c3 = self.down3(self.pool(c2))
@@ -539,6 +545,10 @@ class SmallUNet(nn.Module):
         u1 = self.conv1(torch.cat([u1, c1], dim=1))
 
         logits = self.out(u1)
+        return u1, m, logits
+
+    def forward(self, x: torch.Tensor):
+        u1, m, logits = self.coarse_forward(x)
         sdt = self.out_sdt(u1) if self.out_sdt is not None else None
         if self.refine_head is not None:
             refined_logits = self.refine_head(u1, logits, m)
