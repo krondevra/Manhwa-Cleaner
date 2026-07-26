@@ -11,8 +11,10 @@ frequency, per-family aspect/curvature/jaggedness ranges, bubble-to-page size ra
 border thickness, frame shape frequency, and page width/height distribution.
 
 Usage:
-  .venv/bin/python src/run_style_analysis.py smoke   # 1 chapter, report runtime
-  .venv/bin/python src/run_style_analysis.py full     # full sample
+  .venv/bin/python src/run_style_analysis.py smoke        # 1 chapter, report runtime
+  .venv/bin/python src/run_style_analysis.py full          # 8 chapters/series (default)
+  .venv/bin/python src/run_style_analysis.py full 100      # 100 chapters/series (capped per-series)
+  .venv/bin/python src/run_style_analysis.py full all      # every chapter in every series
 """
 from __future__ import annotations
 
@@ -63,7 +65,7 @@ def sample_pages(chapter_dir: Path, n: int, rng: random.Random) -> list[Path]:
     return rng.sample(pages, n)
 
 
-def run(mode: str) -> None:
+def run(mode: str, chapters_per_override: int | None = None) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     rng = random.Random(SEED)
     t0 = time.time()
@@ -75,7 +77,12 @@ def run(mode: str) -> None:
     per_series_preview_count = {s: 0 for s in SERIES}
 
     series_list = SERIES[:1] if mode == "smoke" else SERIES
-    chapters_per = 1 if mode == "smoke" else CHAPTERS_PER_SERIES
+    if mode == "smoke":
+        chapters_per = 1
+    elif chapters_per_override is not None:
+        chapters_per = chapters_per_override
+    else:
+        chapters_per = CHAPTERS_PER_SERIES
 
     for series_name in series_list:
         series_dir = MATERIALS / series_name
@@ -155,7 +162,8 @@ def run(mode: str) -> None:
             for cls in set(s["class"] for s in bubble_shapes)
         },
     }
-    out_path = OUT / f"summary_{mode}.json"
+    tag = mode if chapters_per_override is None else f"{mode}_cps{chapters_per_override}"
+    out_path = OUT / f"summary_{tag}.json"
     out_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
     print(f"\nWrote {out_path}")
     print(json.dumps(summary, indent=2, ensure_ascii=False))
@@ -164,4 +172,7 @@ def run(mode: str) -> None:
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "smoke"
     assert mode in ("smoke", "full")
-    run(mode)
+    override = None
+    if len(sys.argv) > 2:
+        override = 10**9 if sys.argv[2] == "all" else int(sys.argv[2])
+    run(mode, override)
