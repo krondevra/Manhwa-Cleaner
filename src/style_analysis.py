@@ -24,13 +24,36 @@ from pathlib import Path
 FRAME_DARKNESS = 40  # matches --frame-darkness's own default (src/ml_cleaner.py)
 MIN_SHAPE_AREA = 400  # px^2, at native resolution
 
+# Text-plausibility check for bubble-family interiors (extract_enclosed_holes) -- see the
+# fix note there, 2026-07-26, for why a blanket interior-variance cutoff isn't enough.
+TEXT_INK_THRESHOLD = 140  # gray value below which an interior pixel counts as "ink"
+MIN_INK_FRAC = 0.003  # some ink expected -- a perfectly flat highlight/decal has none
+MAX_INK_FRAC = 0.40  # above this it's a solid dark fill, not sparse text
+MAX_INTERIOR_SATURATION = 40  # 0-255 HSV S; real bubble/text-box fills are ~grayscale
+
+# Skip stroke components whose bounding box covers most of the page -- see the fix note
+# in extract_enclosed_holes for why (dark scene backgrounds, not ink strokes, produce
+# these). Legitimate panel-divider components measured during calibration stayed well
+# under this (typically <5% of page area even on giant multi-panel strips).
+MAX_STROKE_BBOX_FRAC = 0.60
+
 # An enclosed component is treated as a PANEL FRAME, not a bubble/text candidate, if its
-# bounding box covers a large fraction of the page in either axis -- real panels almost
-# always span most of the page width and/or a substantial height; bubbles/text boxes don't.
-# Heuristic, not exact -- the QA preview step (save_preview) exists specifically so this
-# split can be sanity-checked visually before trusting any aggregate built on top of it.
+# bounding box covers a large fraction of the page WIDTH -- real panel dividers in this
+# corpus (vertical-scroll webtoons) are consistently near-full-width horizontal bars,
+# empirically checked across ~60 real frame instances spanning page heights from 1.4k to
+# 32k px (wfrac clustered 57%-99.6%, none below 57%). A HEIGHT-based fraction was tried
+# first and DROPPED, 2026-07-26 (user-caught bug): it's page-relative, so on short pages
+# (common -- page height 5th pctile is 1264px per style_analysis_findings.md) a perfectly
+# normal 300-370px-tall bubble already exceeds a 20%-of-height threshold and gets
+# misrouted to the frame taxonomy. Confirmed on real examples: 4 separate genuine bubbles
+# across 2 flagged pages were ALL misrouted by the height criterion alone (wfrac 15.8%-
+# 47.1%, well under the width threshold below) while zero real frame instances in the
+# calibration sample were ever triggered by height rather than width. Width-only is not
+# just a patch -- it's what the calibration data actually supports for this corpus's
+# layout convention (panels stack vertically, dividers are horizontal bars); heuristic,
+# not exact -- the QA preview step (save_preview) exists specifically so this split can be
+# sanity-checked visually before trusting any aggregate built on top of it.
 FRAME_WIDTH_FRAC = 0.55
-FRAME_HEIGHT_FRAC = 0.20
 
 
 # ── contour geometry helpers ─────────────────────────────────────────────────
@@ -113,7 +136,7 @@ def classify_and_measure(contour: np.ndarray, page_w: int, page_h: int,
     aspect = max(rw, rh) / min(rw, rh)
 
     x, y, cw, ch = cv2.boundingRect(contour)
-    is_frame = (cw >= FRAME_WIDTH_FRAC * page_w) or (ch >= FRAME_HEIGHT_FRAC * page_h)
+    is_frame = cw >= FRAME_WIDTH_FRAC * page_w
 
     pts = contour.reshape(-1, 2).astype(np.float64)
     resampled = resample_contour(pts, n_samples=150)
@@ -175,10 +198,31 @@ def extract_enclosed_holes(rgb: np.ndarray, min_area: float = MIN_SHAPE_AREA) ->
     stroke = cv2.morphologyEx(stroke, cv2.MORPH_CLOSE, k, iterations=1)
     num_labels, labels, comp_stats, _ = cv2.connectedComponentsWithStats(stroke, connectivity=8)
 
+    page_area = page_w * page_h
     out = []
     for label in range(1, num_labels):
         x, y, cw, ch, comp_area = comp_stats[label]
         if cw * ch < min_area + comp_area:
+            continue
+        if cw * ch >= MAX_STROKE_BBOX_FRAC * page_area:
+            # A dark SCENE background (night scenes, shadow, etc.) falls under the same
+            # gray<=FRAME_DARKNESS threshold as an ink stroke and can connect into one
+            # enormous component spanning most of the page -- confirmed, 2026-07-26
+            # (user-flagged QA finding): on such a page, the corner-flood-fill's "hole"
+            # detection stops being reliable, because light regions (a character's face,
+            # a bubble sitting inside the dark scene) can leak through other unrelated
+            # light regions elsewhere in the same giant bounding box to reach the corner,
+            # instead of being cleanly isolated as their own hole -- this is why two real,
+            # clearly-drawn jagged speech bubbles on a dark night-scene page were silently
+            # missed entirely (not misclassified -- never even produced as a candidate
+            # hole), while nearby unrelated light slivers on the character's face/clothing
+            # showed up as spurious partial "holes" instead. Skipping components this
+            # large is an honest, bounded limitation, not a fix for the general case: real
+            # per-bubble detection on dark-background pages needs a different algorithm
+            # (test each light blob for local enclosure directly, not a global corner
+            # flood-fill over a page-spanning dark component) -- out of scope here. This
+            # cap only excludes giant pathological components; legitimate large panel
+            # dividers/frames measured during calibration stayed well under it.
             continue
         comp = (labels[y:y + ch, x:x + cw] == label).astype(np.uint8)
         padded = np.zeros((ch + 2, cw + 2), dtype=np.uint8)
@@ -199,25 +243,48 @@ def extract_enclosed_holes(rgb: np.ndarray, min_area: float = MIN_SHAPE_AREA) ->
                 nz = dist[dist > 0]
                 stats["border_thickness"] = float(np.median(nz) * 2) if nz.size else 0.0
             else:
-                # Real speech-bubble/text-box interiors are flat, light fills. Small
-                # enclosed ink loops elsewhere in the artwork (jewelry, clothing seams,
-                # decorative patterns, glyph counters in SFX/logo text) are NOT -- their
-                # interior is shaded/illustrated with real color variance. Confirmed
-                # visually (user-flagged QA finding, 2026-07-26): unfiltered, these
-                # false positives land squarely on character art (cuffs, collars,
-                # bracelets) in multiple previews. Filter on interior brightness/variance
-                # before accepting a shape into the bubble-family population.
+                # Real speech-bubble/text-box interiors are a flat, light fill with dark
+                # TEXT ink on top -- not uniformly flat, and not continuously shaded like
+                # real artwork. Confirmed visually (user-flagged QA findings, 2026-07-26):
+                # unfiltered, small enclosed ink loops elsewhere in the artwork (jewelry,
+                # clothing seams, decorative patterns, glyph counters in SFX/logo text)
+                # get swept in as false positives; a first fix (blanket
+                # interior_std<=35 over the WHOLE interior) stopped that but
+                # over-corrected -- it also rejected real bubbles with enough text ink to
+                # push interior variance up (confirmed: a clean, correctly-shaped
+                # "ПРАВДА?" oval bubble, solidity=0.995, was rejected at
+                # interior_std=50.5 despite interior_mean=242.6, purely from its own
+                # text). Replaced with an explicit text-plausibility check: split the
+                # interior into "ink" (dark) vs "background" pixels, and require the
+                # background ALONE -- not the whole interior -- to be a flat light fill,
+                # plus a plausible (not zero, not solid-fill) ink coverage fraction. A low
+                # mean-saturation check catches colorful decorative fills a
+                # brightness-only test could still miss.
                 mask_local = np.zeros((ch, cw), dtype=np.uint8)
                 cv2.drawContours(mask_local, [c], -1, 1, thickness=-1)
-                interior = region[mask_local.astype(bool)]
+                mask_bool = mask_local.astype(bool)
+                interior = region[mask_bool]
                 if interior.size == 0:
                     continue
-                interior_mean = float(interior.mean())
-                interior_std = float(interior.std())
-                stats["interior_mean"] = interior_mean
-                stats["interior_std"] = interior_std
-                if interior_mean < 170.0 or interior_std > 35.0:
-                    continue  # not a flat light fill -> artwork detail, not a bubble/text box
+                interior_gray = cv2.cvtColor(region, cv2.COLOR_RGB2GRAY)[mask_bool]
+                ink = interior_gray < TEXT_INK_THRESHOLD
+                ink_frac = float(np.mean(ink))
+                bg_pixels = interior[~ink]
+                if bg_pixels.size == 0:
+                    continue
+                bg_mean = float(bg_pixels.mean())
+                bg_std = float(bg_pixels.std())
+                mean_sat = float(cv2.cvtColor(region, cv2.COLOR_RGB2HSV)[mask_bool][:, 1].mean())
+                stats["interior_mean"] = bg_mean
+                stats["interior_std"] = bg_std
+                stats["ink_frac"] = ink_frac
+                stats["mean_saturation"] = mean_sat
+                if not (MIN_INK_FRAC <= ink_frac <= MAX_INK_FRAC):
+                    continue  # no plausible text ink, or a solid dark fill -- not a bubble/text box
+                if bg_mean < 170.0 or bg_std > 20.0:
+                    continue  # non-ink background isn't a flat light fill -> artwork detail
+                if mean_sat > MAX_INTERIOR_SATURATION:
+                    continue  # colorful -- real bubble/text-box fills are ~grayscale
             stats["contour"] = stats["contour"] + np.array([x, y])
             stats["stroke_bbox"] = (int(x), int(y), int(cw), int(ch))
             out.append(stats)
@@ -226,11 +293,16 @@ def extract_enclosed_holes(rgb: np.ndarray, min_area: float = MIN_SHAPE_AREA) ->
 
 # ── QA preview ────────────────────────────────────────────────────────────────
 
+# Bubble-family: saturated primary/secondary hues. Frame-family: desaturated brown/gray
+# tones, deliberately far from every bubble color -- frame_irregular's old color
+# (150,0,255) was close enough to thorn's (255,0,255) to fool a visual QA spot-check at a
+# glance (2026-07-26, this is how a frame-misrouting bug got misread as a correctly
+# classified bubble). Frame and bubble classes must never be confusable by hue alone.
 PREVIEW_COLORS = {
     "oval": (0, 255, 0), "cloud": (255, 200, 0), "spiky": (255, 0, 0),
     "thorn": (255, 0, 255), "rectangle": (0, 128, 255),
-    "frame_rect": (0, 200, 200), "frame_angled": (0, 150, 255), "frame_irregular": (150, 0, 255),
-    "other": (128, 128, 128),
+    "frame_rect": (140, 140, 140), "frame_angled": (180, 140, 80), "frame_irregular": (100, 60, 20),
+    "other": (0, 0, 0),
 }
 
 

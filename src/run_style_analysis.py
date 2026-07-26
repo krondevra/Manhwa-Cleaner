@@ -46,7 +46,7 @@ SERIES = [
 SEED = 20260726
 CHAPTERS_PER_SERIES = 8
 MAX_PAGES_PER_CHAPTER = 15  # runtime safety cap -- some raw "pages" are 40k+ px tall
-PREVIEWS_PER_SERIES = 3
+PREVIEWS_PER_SERIES = 6
 
 
 def sample_chapters(series_dir: Path, n: int, rng: random.Random) -> list[Path]:
