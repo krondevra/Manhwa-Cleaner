@@ -16,6 +16,8 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from style_analysis import classify_and_measure
+
 Image.MAX_IMAGE_PIXELS = None
 warnings.simplefilter("ignore", Image.DecompressionBombWarning)
 
@@ -571,15 +573,36 @@ class SmallUNet(nn.Module):
 
 
 class DiceBCELoss(nn.Module):
+    """2026-07-29 (halo diagnosis, Attempt 2 -- ml_strategy_history.md's model 13.0 entry):
+    the class-imbalance correction (pos_weight) and any per-pixel boundary/curvature loss
+    weighting are combined ADDITIVELY here, not via PyTorch's own
+    F.binary_cross_entropy_with_logits(weight=..., pos_weight=...) which multiplies them --
+    that compounding was model 13.0's confirmed regression mechanism (a boundary weight of
+    5 with pos_weight=4 gave a delete-class boundary pixel 5*4=20x effective weight vs a
+    keep-class boundary pixel's 5x, a 4x asymmetry that pushed the model toward MORE
+    deletion exactly where precision mattered most). With `weight` defaulting to an all-ones
+    tensor (baseline, matching every existing caller when boundary/curvature weighting is
+    off), this is an exact no-op identical to the old multiplicative formula -- the two
+    formulas only diverge when `weight` deviates from 1.0 somewhere, which is exactly the
+    case this decoupling is meant to fix."""
     def __init__(self, pos_weight: float = 1.0, dice_weight: float = 0.65) -> None:
         super().__init__()
-        self.register_buffer("pos_weight_tensor", torch.tensor([pos_weight], dtype=torch.float32))
+        self.pos_weight = pos_weight
         self.dice_weight = dice_weight
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor, weight: Optional[torch.Tensor] = None) -> torch.Tensor:
-        bce = F.binary_cross_entropy_with_logits(
-            logits, targets, weight=weight, pos_weight=self.pos_weight_tensor.to(logits.device)
-        )
+        # targets is 0/1 (keep/delete); this gives exactly pos_weight where target==1,
+        # exactly 1.0 where target==0 -- the same class-imbalance correction as before.
+        class_weight = 1.0 + (self.pos_weight - 1.0) * targets
+        if weight is not None:
+            # ADD the boundary/curvature bump (weight - 1.0, i.e. however far above
+            # baseline) on top of the class weight, instead of multiplying through it --
+            # a delete-class boundary pixel gets pos_weight + (boundary_weight - 1), the
+            # SAME absolute bump a keep-class boundary pixel gets, not a compounded one.
+            combined_weight = class_weight + (weight - 1.0)
+        else:
+            combined_weight = class_weight
+        bce = F.binary_cross_entropy_with_logits(logits, targets, weight=combined_weight)
         probs = torch.sigmoid(logits)
         dims = (1, 2, 3)
         inter = (probs * targets).sum(dims)
@@ -732,6 +755,10 @@ class PatchDataset(Dataset):
         compute_sdt: bool = False,
         sdt_clamp_radius: int = 8,
         scale_jitter: float = 0.0,
+        curvature_patch_ratio: float = 0.0,
+        curvature_top_frac: float = 0.4,
+        background_patch_ratio: float = 0.0,
+        background_min_area_frac: float = 0.05,
     ) -> None:
         self.pairs = pairs
         self.alpha_threshold = alpha_threshold
@@ -749,10 +776,100 @@ class PatchDataset(Dataset):
         self.compute_sdt = compute_sdt
         self.sdt_clamp_radius = sdt_clamp_radius
         self.scale_jitter = scale_jitter
-        self._cache: "OrderedDict[int, Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[Tuple[np.ndarray, np.ndarray]], Optional[Tuple[np.ndarray, np.ndarray]]]]" = OrderedDict()
+        self.curvature_patch_ratio = curvature_patch_ratio
+        self.curvature_top_frac = curvature_top_frac
+        self.background_patch_ratio = background_patch_ratio
+        self.background_min_area_frac = background_min_area_frac
+        self._cache: "OrderedDict[int, Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[Tuple[np.ndarray, np.ndarray]], Optional[Tuple[np.ndarray, np.ndarray]], Optional[Tuple[np.ndarray, np.ndarray]], Optional[Tuple[np.ndarray, np.ndarray]]]]" = OrderedDict()
 
     def __len__(self) -> int:
         return self.patches_per_epoch
+
+    def _curvature_coords(self, mask: np.ndarray, step: int = 6) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """2026-07-29: bubble/cloud halo diagnosis (Part 1 revisited, synthetic_curriculum_plan.md)
+        found the residual undeleted-margin defect correlates with LOCAL CONTOUR CURVATURE --
+        smoothly-curving contours (ovals, organic shapes) leak far more than sharp-cornered
+        ones (spiky/thorn), consistent with gradient-based guidance channels smearing out
+        along a continuously-turning boundary (no discrete corner to sharply localize).
+        Returns (ys, xs) of contour points in the top `curvature_top_frac` of local turn-angle
+        magnitude, for oversampling -- data-side only, does not touch the loss.
+
+        Note: this is a more targeted variant of the existing --boundary-patch-ratio (which
+        samples ANY boundary pixel uniformly) -- history (ml_strategy_history.md, model 13.0
+        entry) records --boundary-patch-ratio itself gave "no improvement" for the related
+        'clauds' defect. Curvature-weighting specifically is untested; flagged so results
+        aren't read as confirming or contradicting that prior finding."""
+        mask_u8 = (mask > 0).astype(np.uint8)
+        contours, _ = cv2.findContours(mask_u8, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+        pts = []
+        weights = []
+        for cnt in contours:
+            cnt = cnt.reshape(-1, 2)  # (x, y)
+            n = len(cnt)
+            if n < step * 2 + 1:
+                continue
+            prev_pts = np.roll(cnt, step, axis=0)
+            next_pts = np.roll(cnt, -step, axis=0)
+            v1 = cnt - prev_pts
+            v2 = next_pts - cnt
+            n1 = np.linalg.norm(v1, axis=1)
+            n2 = np.linalg.norm(v2, axis=1)
+            valid = (n1 > 1e-3) & (n2 > 1e-3)
+            if not valid.any():
+                continue
+            cos_angle = np.clip(
+                (v1[valid] * v2[valid]).sum(axis=1) / (n1[valid] * n2[valid]), -1.0, 1.0
+            )
+            angle = np.arccos(cos_angle)  # 0 = straight, larger = more sharply turning
+            pts.append(cnt[valid][:, ::-1])  # -> (y, x)
+            weights.append(angle)
+        if not pts:
+            return None
+        pts = np.concatenate(pts, axis=0)
+        weights = np.concatenate(weights, axis=0)
+        if len(weights) < 10:
+            return (pts[:, 0], pts[:, 1])
+        thresh = np.percentile(weights, (1.0 - self.curvature_top_frac) * 100)
+        sel = pts[weights >= thresh]
+        if len(sel) == 0:
+            return (pts[:, 0], pts[:, 1])
+        return (sel[:, 0], sel[:, 1])
+
+    def _background_extent_coords(self, mask: np.ndarray, boundary: np.ndarray) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """2026-07-30: halo investigation Part 2, 3rd mechanism (synthetic_curriculum_plan.md,
+        halo_investigation.md). Real-instance re-measurement found boundary-loss reweighting
+        (this session's Attempt 2, tested at radius 3 and 16) only helps the one ambiguous/
+        partial-marker real bubble instance -- ordinary bordered bubbles sitting next to a
+        large, unambiguous true-background region (confirmed by direct visual inspection: a
+        vertical-scroll gutter region, not misclassified in-panel content) show ZERO
+        measurable change at either radius. This suggests the model has learned a local
+        'near-bubble = keep' shortcut that overrides even a large, textureless true-background
+        area right next to it -- and that boundary patches during training rarely pair a
+        bubble edge with a genuinely LARGE contiguous background region on the other side (most
+        boundary pixels' delete-side neighbor is a comparatively small sliver, since bubbles are
+        usually placed within panels dense with real content). Oversamples boundary points
+        whose delete-side neighbor belongs to a delete-labeled connected component covering at
+        least `background_min_area_frac` of the full mask -- i.e. specifically the "bubble edge
+        with a big real background area beyond it" case -- data-side only, does not touch the
+        loss. A distinct selection criterion from `_curvature_coords` (which failed, Attempt 1)
+        and orthogonal to boundary-loss-radius (Attempt 2) -- targets exactly the failure
+        pattern the real-instance measurements characterized."""
+        delete_u8 = (mask > 0).astype(np.uint8)
+        n_labels, labels = cv2.connectedComponents(delete_u8, connectivity=8)
+        if n_labels <= 1:
+            return None
+        areas = np.bincount(labels.ravel(), minlength=n_labels)
+        total = mask.size
+        big_labels = [lbl for lbl in range(1, n_labels) if areas[lbl] >= self.background_min_area_frac * total]
+        if not big_labels:
+            return None
+        big_mask = np.isin(labels, big_labels)
+        big_mask_dilated = cv2.dilate(big_mask.astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
+        sel = boundary & big_mask_dilated
+        ys, xs = np.where(sel)
+        if len(xs) == 0:
+            return None
+        return (ys, xs)
 
     def _get(self, sample_index: int):
         if sample_index in self._cache:
@@ -775,10 +892,17 @@ class PatchDataset(Dataset):
         bys, bxs = np.where(boundary)
         boundary_coords = (bys, bxs) if len(bxs) else None
 
-        self._cache[sample_index] = (arr, mask, boundary, positive_coords, boundary_coords)
+        curvature_coords = self._curvature_coords(mask) if self.curvature_patch_ratio > 0.0 else None
+        background_coords = (
+            self._background_extent_coords(mask, boundary) if self.background_patch_ratio > 0.0 else None
+        )
+
+        self._cache[sample_index] = (
+            arr, mask, boundary, positive_coords, boundary_coords, curvature_coords, background_coords,
+        )
         if len(self._cache) > self.cache_size:
             self._cache.popitem(last=False)
-        return arr, mask, boundary, positive_coords, boundary_coords
+        return arr, mask, boundary, positive_coords, boundary_coords, curvature_coords, background_coords
 
     def _weight_crop(self, boundary_crop: Optional[np.ndarray]) -> np.ndarray:
         if boundary_crop is None or self.boundary_loss_weight == 1.0:
@@ -806,13 +930,28 @@ class PatchDataset(Dataset):
         ps = self.patch_size
         for _ in range(40):
             sample_index = random.randrange(len(self.pairs))
-            arr, mask, boundary, coords, boundary_coords = self._get(sample_index)
+            arr, mask, boundary, coords, boundary_coords, curvature_coords, background_coords = self._get(sample_index)
             h, w = mask.shape
             want_positive = random.random() < self.positive_patch_ratio
 
             if want_positive and coords is not None:
                 use_boundary = boundary_coords is not None and random.random() < self.boundary_patch_ratio
-                ys, xs = boundary_coords if use_boundary else coords
+                use_curvature = (
+                    use_boundary and curvature_coords is not None
+                    and random.random() < self.curvature_patch_ratio
+                )
+                use_background = (
+                    use_boundary and not use_curvature and background_coords is not None
+                    and random.random() < self.background_patch_ratio
+                )
+                if use_curvature:
+                    ys, xs = curvature_coords
+                elif use_background:
+                    ys, xs = background_coords
+                elif use_boundary:
+                    ys, xs = boundary_coords
+                else:
+                    ys, xs = coords
                 p = random.randrange(len(xs))
                 cy = int(ys[p])
                 cx = int(xs[p])
@@ -845,7 +984,7 @@ class PatchDataset(Dataset):
             return image, target, weight, sdt
 
         sample_index = random.randrange(len(self.pairs))
-        arr, mask, boundary, _, _ = self._get(sample_index)
+        arr, mask, boundary, _, _, _, _ = self._get(sample_index)
         h, w = mask.shape
         y0 = random.randint(0, max(0, h - ps))
         x0 = random.randint(0, max(0, w - ps))
@@ -932,6 +1071,10 @@ def train_command(args: argparse.Namespace) -> None:
         compute_sdt=compute_sdt,
         sdt_clamp_radius=args.sdt_clamp_radius,
         scale_jitter=args.scale_jitter,
+        curvature_patch_ratio=args.curvature_patch_ratio,
+        curvature_top_frac=args.curvature_top_frac,
+        background_patch_ratio=args.background_patch_ratio,
+        background_min_area_frac=args.background_min_area_frac,
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, pin_memory=(device.type == "cuda"), drop_last=True)
 
@@ -953,6 +1096,10 @@ def train_command(args: argparse.Namespace) -> None:
             compute_sdt=compute_sdt,
             sdt_clamp_radius=args.sdt_clamp_radius,
             scale_jitter=args.scale_jitter,
+            curvature_patch_ratio=args.curvature_patch_ratio,
+            curvature_top_frac=args.curvature_top_frac,
+            background_patch_ratio=args.background_patch_ratio,
+            background_min_area_frac=args.background_min_area_frac,
         )
         val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
 
@@ -993,6 +1140,10 @@ def train_command(args: argparse.Namespace) -> None:
                 compute_sdt=compute_sdt,
                 sdt_clamp_radius=args.sdt_clamp_radius,
                 scale_jitter=args.scale_jitter,
+                curvature_patch_ratio=args.curvature_patch_ratio,
+                curvature_top_frac=args.curvature_top_frac,
+                background_patch_ratio=args.background_patch_ratio,
+                background_min_area_frac=args.background_min_area_frac,
             )
             variant_val_loaders[variant] = DataLoader(
                 v_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
@@ -1474,6 +1625,185 @@ def repair_frame_interiors(
     return fixed
 
 
+def close_bubble_halo(
+    rgb: np.ndarray,
+    delete_mask: np.ndarray,
+    ring_width: int,
+    frame_darkness: int,
+    min_bubble_area: float,
+    min_background_area: int,
+) -> np.ndarray:
+    """2026-07-30 halo investigation (.tmp/notes/halo_investigation.md,
+    docs/ml_strategy_history.md): three training-side mechanisms (curvature-weighted patch
+    sampling, boundary-aware loss reweighting at two radii, background-extent-aware patch
+    sampling) all failed to close the curvature-correlated ~16-32px undeleted "keep" halo
+    left around bubble/cloud contours on Stage 2 checkpoints. This is the geometric
+    postprocessing complement instead -- the same relationship --repair-frames has to
+    --reclaim-islands (a cheap, no-retrain fix on the model's OUTPUT mask, not a retrain).
+
+    This is the inverse problem from repair_frame_interiors: instead of reclaiming
+    delete->keep inside a hole fully enclosed by dark strokes, this reclaims keep->delete in
+    a thin ring around a detected bubble/cloud contour, but only where that ring is also
+    within reach of a LARGE true-background delete region -- never touching real nearby
+    content (text, other art), which is never part of any delete component at all and so
+    fails that reach test for free, and never touching small delete speckles/noise, which
+    don't meet min_background_area.
+
+    Three design points worth calling out:
+    - The bubble's true boundary is found from the RGB's own ink outline (the same
+      flood-fill-from-corner enclosed-hole technique repair_frame_interiors and
+      style_analysis.extract_enclosed_holes share), NOT by eroding the predicted keep mask.
+      An erosion-based "shrink the haloed mask back down to a guessed core" approach was
+      tried first and rejected: the erosion depth needed to fully strip a wide halo has to
+      match or exceed the halo's own (variable, 2-32px) width, but excluding that entire
+      eroded region from the ring then wrongly protects whatever fraction of the halo got
+      swept up in it too, leaving it unfixed -- and erosion deep enough to avoid that risk
+      eats into the real bubble body once the halo happens to be narrower than the erosion
+      depth on a given instance. The real ink outline has neither problem: it's an exact,
+      halo-independent ground truth for where the bubble actually is, the same "a trusted
+      geometric boundary independent of mask topology" principle repair_frame_interiors is
+      built on.
+    - "Connected to the bubble's own interior" can't distinguish halo from safe-to-touch,
+      because by definition the halo has no gap separating it from the bubble -- that's the
+      whole defect. The actual test is whether a ring pixel is ALSO within reach of a large
+      connected delete component, independent of what it's connected to on the keep side.
+    - Real nearby content (a character's face, unrelated art) is often NOT bounded by its
+      own clean ink outline, so it can end up 8-connected to a bubble's halo band directly
+      (confirmed by testing: a large keep blob placed to touch the halo within ring_width
+      is NOT excluded by the two points above alone, since it's still "connected to the
+      bubble's own component" and still has real background beyond IT too). The
+      discriminator that actually works: a genuine halo is THIN throughout, so no pixel in
+      it is ever far from a non-keep boundary; real content has bulk somewhere far from any
+      boundary. Computed per-PIXEL, not per-component (a component-level "reject the whole
+      blob if any part is too thick" over-corrects when a thin halo happens to touch a
+      thick object -- it drags the entire merged component, halo included, down with it):
+      a pixel counts as unambiguously "thick, real content" only once it's more than
+      ring_width from every residual boundary; growing that thick core back out by
+      ring_width gives the region under its influence (including its own edge). Only that
+      reach is excluded -- the rest of a touching-but-thin halo stays eligible.
+
+    Acts per-detected-bubble, not per-whole-connected-region (the same per-hole-not-per-
+    component lesson repair_frame_interiors is built on): each bubble's own ring is bounded
+    to its own true contour + reach, so two merged/overlapping bubbles sharing one keep
+    component each get their own halo closed without cross-bubble interference (each is its
+    own detected hole, so each is excluded from the OTHER's "residual" thinness test too).
+    """
+    h, w = delete_mask.shape
+    shape_classes = {"oval", "thorn", "cloud", "spiky"}
+
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    stroke = (gray <= frame_darkness).astype(np.uint8)
+    stroke_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    stroke = cv2.morphologyEx(stroke, cv2.MORPH_CLOSE, stroke_kernel, iterations=1)
+    num_stroke, stroke_labels, stroke_stats, _ = cv2.connectedComponentsWithStats(stroke, connectivity=8)
+
+    keep_mask = ~delete_mask
+    n_keep, keep_labels = cv2.connectedComponents(keep_mask.astype(np.uint8), connectivity=8)
+    n_del, del_labels, del_stats, _ = cv2.connectedComponentsWithStats(
+        delete_mask.astype(np.uint8), connectivity=8
+    )
+    big_bg_labels = [
+        lbl for lbl in range(1, n_del) if del_stats[lbl, cv2.CC_STAT_AREA] >= min_background_area
+    ]
+    big_bg = np.isin(del_labels, big_bg_labels) if big_bg_labels else np.zeros_like(del_labels, dtype=bool)
+
+    # Pass 1: find every valid bubble/cloud hole across the whole page and build the union
+    # of their own (hole + stroke) footprints -- this is the "definitely real bubble
+    # content, never touch it" region, used both to exclude it from ring zones directly and
+    # to strip it out before the residual-thinness test below.
+    detections = []
+    all_protect = np.zeros((h, w), dtype=bool)
+    for label in range(1, num_stroke):
+        sx, sy, scw, sch, _s_area = stroke_stats[label]
+        comp = (stroke_labels[sy : sy + sch, sx : sx + scw] == label).astype(np.uint8)
+        padded = np.zeros((sch + 2, scw + 2), dtype=np.uint8)
+        padded[1:-1, 1:-1] = comp
+        ff_mask = np.zeros((sch + 4, scw + 4), dtype=np.uint8)
+        cv2.floodFill(padded, ff_mask, (0, 0), 1)
+        holes = (padded[1:-1, 1:-1] == 0).astype(np.uint8)
+        if not holes.any():
+            continue
+        hole_contours, _ = cv2.findContours(holes, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+        for hole_contour in hole_contours:
+            hole_contour = hole_contour + np.array([sx, sy])
+            info = classify_and_measure(hole_contour, w, h, min_area=min_bubble_area)
+            if info is None or info["is_frame"] or info["class"] not in shape_classes:
+                continue
+            moments = cv2.moments(hole_contour)
+            if moments["m00"] == 0:
+                continue
+            cx = int(moments["m10"] / moments["m00"])
+            cy = int(moments["m01"] / moments["m00"])
+            bubble_label = keep_labels[cy, cx]
+            if bubble_label == 0:
+                continue
+
+            x, y, cw, ch = info["bbox"]
+            pad = ring_width + 2
+            x0, y0 = max(0, x - pad), max(0, y - pad)
+            x1, y1 = min(w, x + cw + pad), min(h, y + ch + pad)
+            bubble_crop = np.zeros((y1 - y0, x1 - x0), dtype=np.uint8)
+            cv2.drawContours(bubble_crop, [hole_contour - np.array([x0, y0])], -1, 1, thickness=-1)
+            bubble_crop = bubble_crop > 0
+            # Protect the hole's interior AND the ink stroke itself (not just the interior)
+            # -- the stroke is real bubble content (part of the drawn artwork), but sits
+            # outside the flood-fill hole by construction. Reusing the exact `stroke`
+            # pixels here (not a guessed margin) means this is precise regardless of the
+            # stroke's own line width.
+            protect_crop = bubble_crop | (stroke[y0:y1, x0:x1] > 0)
+            all_protect[y0:y1, x0:x1] |= protect_crop
+
+            detections.append({
+                "bbox": (x0, y0, x1, y1), "bubble_crop": bubble_crop,
+                "protect_crop": protect_crop, "bubble_label": bubble_label,
+            })
+
+    if not detections:
+        return delete_mask.copy()
+
+    # Pass 2: strip every detected bubble's own footprint from the keep mask; whatever
+    # keep pixels remain ("residual") may be halo, real adjacent content, or both touching
+    # each other. A per-PIXEL test (not per-component -- a component-level "reject the
+    # whole blob if any part is too thick" over-corrects: if a thin halo happens to touch a
+    # thick object, as real adjacent content might, it drags the entire merged component,
+    # halo included, down with it): a pixel unambiguously belongs to a thick, real object
+    # only if it's far from every residual boundary (distance-to-boundary > ring_width) --
+    # a genuine halo, being thin throughout, never reaches that distance anywhere. Growing
+    # that "thick core" back out by ring_width gives the region under a thick object's
+    # influence (including its own edge); anything else in residual is eligible as a
+    # plausible thin fringe, even where it happens to touch something thick (only the
+    # specific stretch actually within reach of the thick core is excluded, not the whole
+    # component).
+    residual = keep_mask & ~all_protect
+    resid_dist = cv2.distanceTransform(residual.astype(np.uint8), cv2.DIST_L2, 5)
+    thick_core = resid_dist > ring_width
+    thickness_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ring_width * 2 + 1,) * 2)
+    protected_by_thickness = cv2.dilate(thick_core.astype(np.uint8), thickness_kernel) > 0
+    thin_residual = residual & ~protected_by_thickness
+
+    fixed = delete_mask.copy()
+    ring_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ring_width * 2 + 1,) * 2)
+
+    for det in detections:
+        x0, y0, x1, y1 = det["bbox"]
+        bubble_crop = det["bubble_crop"]
+        keep_label_crop = keep_labels[y0:y1, x0:x1] == det["bubble_label"]
+        bg_crop = big_bg[y0:y1, x0:x1]
+        thin_crop = thin_residual[y0:y1, x0:x1]
+
+        ring_zone = cv2.dilate(bubble_crop.astype(np.uint8), ring_kernel) > 0
+        ring_zone &= keep_label_crop & thin_crop
+        if not ring_zone.any():
+            continue
+        bg_reach = cv2.dilate(bg_crop.astype(np.uint8), ring_kernel) > 0
+
+        region = fixed[y0:y1, x0:x1]
+        region[ring_zone & bg_reach] = True
+
+    return fixed
+
+
 _cascadepsp_refiner_cache: dict[tuple[str, str], object] = {}
 
 # Must match src/probe_cascadepsp.py's GT_BAND/MARGIN exactly -- every quality
@@ -1614,6 +1944,12 @@ def process_command(args: argparse.Namespace) -> None:
             rgb, delete_mask, args.frame_darkness, args.frame_min_interior, args.frame_inset,
         )
 
+    if args.close_bubble_halo:
+        delete_mask = close_bubble_halo(
+            rgb, delete_mask, args.halo_ring_width, args.halo_frame_darkness,
+            args.halo_min_bubble_area, args.halo_min_background_area,
+        )
+
     if args.cascadepsp_refine:
         log(f"cascadepsp refine (weights={args.cascadepsp_weights}, fast={args.cascadepsp_fast})")
         delete_mask = apply_cascadepsp_refine(
@@ -1714,6 +2050,12 @@ def process_folder_command(args: argparse.Namespace) -> None:
                 rgb, delete_mask, args.frame_darkness, args.frame_min_interior, args.frame_inset,
             )
 
+        if args.close_bubble_halo:
+            delete_mask = close_bubble_halo(
+                rgb, delete_mask, args.halo_ring_width, args.halo_frame_darkness,
+                args.halo_min_bubble_area, args.halo_min_background_area,
+            )
+
         if args.cascadepsp_refine:
             delete_mask = apply_cascadepsp_refine(
                 rgb, delete_mask, expand_path(args.cascadepsp_weights), device, args.cascadepsp_fast,
@@ -1772,7 +2114,8 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
         "real background always reaches the strip edge, so an enclosed light region "
         "can never be background. Repairs the interior failure topologies "
         "--reclaim-islands can't reach (edge-connected clauds bites, keep-speck "
-        "fragmentation). Cheap, no retraining; runs last in the postprocess chain.",
+        "fragmentation). Cheap, no retraining; runs before --close-bubble-halo in the "
+        "postprocess chain.",
     )
     parser.add_argument(
         "--frame-darkness", type=int, default=40,
@@ -1786,6 +2129,47 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
         "--frame-inset", type=int, default=2,
         help="Erode each repaired interior by this many px so the frame stroke's own "
         "seam is never overwritten by --repair-frames",
+    )
+    parser.add_argument(
+        "--close-bubble-halo",
+        action="store_true",
+        help="Force 'keep' pixels back to 'delete' in a thin ring around a detected "
+        "bubble/cloud contour, but only where that ring is also within reach of a large "
+        "true-background delete region -- a geometric postprocessing fix for the "
+        "curvature-correlated undeleted-halo defect around bubbles/clouds on Stage 2 "
+        "checkpoints (three training-side fixes were tried and discarded; see "
+        ".tmp/notes/halo_investigation.md and docs/ml_strategy_history.md). The inverse "
+        "problem from --repair-frames (keep->delete in an exterior ring, not "
+        "delete->keep in an enclosed interior); never touches real nearby content (not "
+        "part of any delete component, so it fails the reach test for free) or small "
+        "delete speckles (below --halo-min-background-area). Cheap, no retraining; runs "
+        "after --repair-frames, before --cascadepsp-refine.",
+    )
+    parser.add_argument(
+        "--halo-ring-width", type=int, default=24,
+        help="Max px outward from a detected bubble/cloud's true (ink-outline) contour "
+        "that --close-bubble-halo will reclassify keep->delete. Matches the diagnosed "
+        "16-32px halo extent (halo_investigation.md).",
+    )
+    parser.add_argument(
+        "--halo-frame-darkness", type=int, default=40,
+        help="Grayscale <= this counts as an ink stroke for --close-bubble-halo's "
+        "enclosed-hole bubble/cloud detection (same technique and default as "
+        "--frame-darkness/--repair-frames -- the ink outline gives an exact, "
+        "halo-independent boundary for the bubble, unaffected by how wide the model's "
+        "own halo happens to be around it).",
+    )
+    parser.add_argument(
+        "--halo-min-bubble-area", type=float, default=2000,
+        help="Minimum eroded-core contour area for --close-bubble-halo to treat a shape "
+        "as a candidate bubble/cloud. Larger than style_analysis.MIN_SHAPE_AREA (400) to "
+        "avoid small-glyph false positives at inference time.",
+    )
+    parser.add_argument(
+        "--halo-min-background-area", type=int, default=8000,
+        help="Minimum connected delete-component area for --close-bubble-halo to treat "
+        "it as real background a halo ring can be reclaimed into, as opposed to a small "
+        "pocket/speck.",
     )
     parser.add_argument(
         "--cascadepsp-refine",
@@ -1903,6 +2287,42 @@ def build_parser() -> argparse.ArgumentParser:
         "--boundary-loss-radius", type=int, default=3,
         help="Pixel radius the mask-boundary band is dilated by before applying "
         "--boundary-loss-weight. Only relevant when --boundary-loss-weight != 1.0.",
+    )
+    p_train.add_argument(
+        "--curvature-patch-ratio", type=float, default=0.0,
+        help="Of patches chosen as boundary patches (see --boundary-patch-ratio), fraction "
+        "further centered on a HIGH-LOCAL-CURVATURE contour point (smoothly-curving "
+        "sections -- ovals, organic shapes) rather than any boundary pixel. 0.0 (default) "
+        "is inert. Targets the 2026-07-29 bubble/cloud halo diagnosis "
+        "(synthetic_curriculum_plan.md): a residual undeleted-margin defect correlated with "
+        "local contour curvature, distinct from (but related to) the historical 'clauds' "
+        "defect that --boundary-patch-ratio was built for. Data-side only, does not touch "
+        "the loss function.",
+    )
+    p_train.add_argument(
+        "--curvature-top-frac", type=float, default=0.4,
+        help="Fraction of a contour's points (by local turn-angle magnitude) considered "
+        "'high curvature' for --curvature-patch-ratio sampling. Only relevant when "
+        "--curvature-patch-ratio > 0.0.",
+    )
+    p_train.add_argument(
+        "--background-patch-ratio", type=float, default=0.0,
+        help="Of patches chosen as boundary patches (see --boundary-patch-ratio), fraction "
+        "further centered on a boundary point whose delete-side neighbor belongs to a LARGE "
+        "contiguous background component (>= --background-min-area-frac of the mask), rather "
+        "than any boundary pixel. 0.0 (default) is inert. Targets the 2026-07-30 halo "
+        "investigation finding (halo_investigation.md): boundary-loss reweighting "
+        "(--boundary-loss-weight/--boundary-loss-radius) only helped one ambiguous real "
+        "instance and left ordinary bordered bubbles next to a large true-background region "
+        "completely unchanged at every tested radius -- suggesting training under-represents "
+        "the 'bubble edge with a big real background area beyond it' pairing. Data-side only, "
+        "does not touch the loss function.",
+    )
+    p_train.add_argument(
+        "--background-min-area-frac", type=float, default=0.05,
+        help="Minimum fraction of the full mask a delete-labeled connected component must "
+        "cover to count as 'large' for --background-patch-ratio sampling. Only relevant when "
+        "--background-patch-ratio > 0.0.",
     )
     p_train.add_argument(
         "--sdt-loss-weight", type=float, default=0.0,

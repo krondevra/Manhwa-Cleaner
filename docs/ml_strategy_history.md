@@ -1439,6 +1439,179 @@ tip `130ad9f`, which is why generation 5 does not otherwise appear on `main`) an
 commit `4.22.12`. Generation 6 (fully self-synthesized curriculum, no P&C composition tuning, no
 third-party weights) begins at `6.1.1`. See `docs/decisions.md` for the versioning-scheme entry.
 
+### Stage 1 (frames) accepted limitation: SFX-on-white-background over-deletion (2026-07-29)
+
+Stage 1 (frames-only diagnostic pipeline, closing checkpoint `.tmp/a6_full10k/a6_full10k.pt`)
+is marked done **with one documented open issue**, not fully clean, per the plan's decision
+gate (one focused diagnose+fix attempt max before accepting and moving on).
+
+**The issue**: a real SFX glyph rendered with an outline over a blank white background
+(`ch1_sfx_text` ROI, `.tmp/diagnostics/ch002_rois.json`) gets 52.4% mean delete-probability
+on `a6_full10k.pt` — well past the `KEEP_PROB_CEILING=0.30` threshold `regression_suite.py`
+uses to gate "keep"-expected content. Originally user-flagged 2026-07-28 ("SFX with outline
+on white bg which we delete caused flood fill leakage"), diagnosed the same day: the
+full-width top/bottom-border frame convention itself is correct (pre-existing, not a new
+bug), production's postprocessing (`--reclaim-islands`) can't fix it (its edge-connectivity
+heuristic can't distinguish this from real background touching the page edge), and the
+actual production checkpoint (`10.0-baseline.pt`) doesn't show this behavior at all.
+Confirmed a training-scale-artifact hypothesis directionally (2k→10k measurably reduces the
+effect — visually, the flooding "pulled back" from face/neck/chin content between the 2k and
+10k checkpoints) without fully eliminating it by 10k images.
+
+**Why accepted rather than re-chased today (2026-07-29)**: this ROI's exact numeric gate
+result was only discovered today (2026-07-28's "12/12 checks passed" closing-gate run did not
+actually include this ROI — see `synthetic_curriculum_plan.md`'s 2026-07-29 Part A section
+for the gate-coverage gap this exposed, now fixed going forward). The underlying defect
+itself was already diagnosed yesterday with a full investigation (real production-pipeline
+test, real production-checkpoint comparison, scale-ablation via 2k vs 10k) — that counts as
+today's "one focused attempt" already spent, so it is not being re-diagnosed from scratch.
+**Next real attempt should try**: more training data (the clearest working lever so far,
+consistent with the training-scale-artifact hypothesis) via the 30k-scale full run already
+planned for Part 6/7, and/or revisit whether this ROI structurally resembles the
+`ch1_caption_box_in_splash` finding (also isolated bordered/outlined content on a busy
+background) closed by Stage 2 bubble training — if so, an SFX-specific Stage may close both
+at once (see `.tmp/notes/stage3_sfx_hypotheses.md`'s hollow-shape hypothesis, which already
+flags this exact connection and its skin_neck-shortcut risk).
+
+### RESOLVED (partial, postprocessing) after 3 FAILED training attempts — Stage 2 bubble/cloud halo defect (2026-07-29/30)
+
+**The defect**: on Stage 2 bubble-fine-tuned checkpoints (starting from
+`b2_full2k_finetune.pt`), a residual band of undeleted (falsely "keep") background remains
+immediately around bubble/cloud contours — general (not limited to bubbles: also present, in
+smaller form, on Stage-1-only cloud/glow content), and correlated with local contour
+curvature (smoothly-curving contours like ovals leak more than sharp-cornered spiky/thorn
+shapes). Present in small form even pre-bubble-training; substantially amplified by it.
+
+Diagnosed via `.tmp/diagnostics/halo_diag{1,2,3,4}.py` (multi-distance ring profile 2-32px,
+curvature correlation) and, critically, via `.tmp/diagnostics/real_boundary_probe.py` — a
+per-angle ray-walk boundary detector built specifically because an initial hand-fit-ellipse
+proxy for a real bubble's silhouette was shown (direct gray-value sampling) to be
+miscalibrated, contaminating early real-instance numbers. The corrected tool walks outward
+from a seed point at 24 angles through the ORIGINAL image pixels, finds the true per-angle
+ink-outline transition (or flags "no-marker" if none exists within the search radius,
+independent of any model), and measures delete-probability at fixed offsets past each angle's
+own detected boundary — never mixing in the bubble's own interior/outline the way a
+guessed-shape ring could. Applied to 6 real instances across `data/chapters-initial/001.png`/
+`002.png` (1 flagged by the user + 5 gathered, deliberately mixed bordered/ambiguous); one
+(inst4) was later found mis-selected (seed landed on an SFX glyph, not a bubble) and
+discarded, leaving 5 valid instances.
+
+**3 genuinely different fix mechanisms tried, all real-instance-verified (not just synthetic
+aggregates), per this project's clauds (5 attempts)/black-bg (6 attempts) attempt-budget
+precedent:**
+
+1. **Data-side: curvature-weighted contour patch sampling** (`--curvature-patch-ratio`,
+   `PatchDataset._curvature_coords`) — oversamples training patches centered on
+   high-local-curvature contour points. **FAILED**: ring-profile re-check showed no
+   improvement, moved slightly the wrong direction.
+
+2. **Loss-side: boundary-aware loss, decoupled from `pos_weight`** (`--boundary-loss-weight`/
+   `--boundary-loss-radius`, `DiceBCELoss`) — this project's model-13.0 attempt at the same
+   idea had a multiplicative bug (`pos_weight` and `boundary_weight` compounded instead of
+   adding, giving delete-class boundary pixels 4x the intended weight vs. keep-class); fixed
+   here to compute weights additively (`class_weight = 1 + (pos_weight-1)*targets`,
+   `combined = class_weight + (boundary_weight-1)`), verified as an exact no-op vs. the old
+   formula when boundary weighting is off. Tested at `--boundary-loss-radius 3` (matching
+   model 13.0's nominal value for comparability) and again at `16` (after establishing the
+   dilation radius directly sets how many pixels around the boundary ever get reweighted, and
+   3px is far short of the halo's own 2-32px extent per the ring-profile). **PARTIAL**: helped
+   1 of 5 valid real instances substantially (the one ambiguous/partial-no-marker case) at
+   both radii, 1 marginally (small movement only at the widest radius), 3 not at all —
+   including two fully-bordered "clear control" instances with literally identical
+   delete-probability at every measured band (2/4/8/16/32px), before and after, at both
+   radii. Widening the radius 5x did not unlock the unresponsive instances, ruling out "radius
+   too narrow" as a complete explanation (though it does explain the 2 instances that did
+   move). One of the 3 unresponsive instances (`ch002` seed 350,70900) was visually confirmed
+   to sit against a genuine, large true-background gutter region in a vertical-scroll page —
+   not a mislabeled "keep" region — so the flat result is a real, unfixed defect, not a
+   measurement artifact. Introduced a minor regression at the wider radius on the
+   already-accepted-limitation `ch1_sfx_text` ROI (0.306→0.385).
+
+3. **Data-side: background-extent-aware patch sampling** (`--background-patch-ratio`/
+   `--background-min-area-frac`, `PatchDataset._background_extent_coords`) — oversamples
+   boundary patches specifically where the delete-side neighbor belongs to a connected
+   background component covering >= 5% of the full mask, targeting exactly the failure
+   pattern mechanism 2 left unresolved ("bubble edge with a big real background area beyond
+   it" is presumably under-represented in ordinary boundary-patch sampling, since most
+   bubbles sit within content-dense panels). Unit-tested in isolation first (confirmed correct
+   selection of the large-region case over a small sliver on a synthetic mask). **FAILED,
+   more decisively than either prior attempt**: zero measurable change at every band on all 5
+   real instances, including the one instance every other mechanism could move at least
+   somewhat. Also regressed a previously-fixed, passing Stage 1 ROI (`ch1_diagonal_gutter`,
+   this session's own Part A fix): 0.5526→0.4823, dropping below the 0.50 pass floor — a
+   genuine forgetting of working content, not just an accepted-limitation drift. Checkpoint
+   discarded, not adopted, per this project's standing policy that any regression on
+   previously-working content stops that attempt immediately.
+
+**Current best understanding (not fully resolved)**: real-vs-synthetic boundary sharpness/
+contrast, measured with the same per-angle detector on both sources, is nearly identical
+(~3% mean difference) — ruling out "real ink outlines are technically harder to see" as the
+dominant driver. The pattern across all 3 attempts — every mechanism helps the single most
+ambiguous/marker-poor real instance and does nothing for ordinary, unambiguously-bordered
+bubbles regardless of the true background's size or clarity beyond them — is most consistent
+with the model having learned a local "near a bubble body = keep" shortcut/prior that
+overrides even large, textureless, unambiguous true-background regions, and that neither
+loss-reweighting near the boundary (any tested radius) nor training-data oversampling (either
+selection criterion tried) was able to dislodge.
+
+**Status after the 3 training-side attempts: stopped per attempt-budget policy, not
+resolved.** `b2_full2k_finetune.pt` remains the best available Stage 2 checkpoint; none of
+the 3 training-side fixes are adopted.
+
+**4th mechanism, a different class — geometric postprocessing (`--close-bubble-halo`,
+2026-07-30)**: per explicit follow-up instruction, fixed geometrically on the model's OUTPUT
+mask instead — the same relationship `--repair-frames` has to `--reclaim-islands`, no
+retraining. New function `close_bubble_halo` (`src/ml_cleaner.py`): detects bubble/cloud
+contours from the RGB's own ink outline (the same flood-fill-from-corner enclosed-hole
+technique `repair_frame_interiors`/`style_analysis.extract_enclosed_holes` share, classified
+via the existing `style_analysis.classify_and_measure` taxonomy) rather than eroding the
+predicted mask — an erosion-based design was tried first and rejected during implementation
+(the erosion depth needed to reliably strip a variable-width halo either leaves part of the
+halo protected/unfixed, or is deep enough to eat real bubble content once the halo happens to
+be narrower than expected on a given instance). Reclassifies keep→delete in a ring around the
+detected contour only where that ring is part of the bubble's own current keep component,
+within reach of a large connected delete component (true background, not a small pocket), and
+not part of a "thick" region (a genuine halo is thin throughout; real adjacent content has
+bulk far from any edge — computed per-pixel via distance-transform after removing every
+detected bubble body, not per-connected-component, since a whole-component test wrongly drags
+a thin halo down with whatever thick object it happens to touch).
+
+Verified on the same 5 real instances with the same ring-distance methodology
+(`real_boundary_probe.py`, extended with a `--close-bubble-halo` hook): closes the halo
+substantially on the one ambiguous/partial-marker instance (inst1) — and in a genuinely
+complementary way to the training-side fixes, improving the CLOSE bands (+2-16px) that those
+barely touched — but produces zero change on the other 4 (inst2/3/5/6), same as every
+training-side attempt. Root-caused directly (not left unexplained): the ink-outline detector
+finds no valid bubble shape at all on those 4 instances at any tested darkness threshold
+(40-140) or closing-kernel size (5-15px) — a genuine small gap in the real scan's own ink
+line lets the flood-fill leak into true background, visually confirmed for one instance. This
+is a different failure mechanism from the training-side one (weak boundary signal in the
+source art itself, vs. a learned "near-bubble = keep" shortcut), but affects the same
+instances — suggesting these specific real locations have unusually incomplete ink boundaries
+that no single mechanism class was likely to fix.
+
+Over-deletion check: zero change on every one of the 9 tracked Stage 1 ROIs (skin, steam,
+sky_clouds, blank_bg, diagonal_gutter, sfx_text, caption_box) on the FULL ch001/ch002 pages.
+Meanwhile the fix does change pixels elsewhere at chapter scale (27,538 px on ch001, 411,823
+on ch002) — confirmed via clustering analysis to form 62 distinct, spatially-bounded groups
+spread across the full ~143k-px-tall ch002 page, consistent with correctly closing many
+individual bubble/cloud halos throughout the whole chapter (not just the 5 hand-picked test
+instances), with zero measured risk to any tracked real-content ROI. Smoke test
+(`src/smoke_close_bubble_halo.py`, mirrors `smoke_repair_frames.py`'s structure) passes all 5
+required cases (halo closes; adjacent real content protected; no-op with no halo; merged
+bubbles handled independently; small background pockets ignored) plus mutation/directionality
+invariants.
+
+**Status: adopted as a real, safe, PARTIAL fix, not a complete resolution.** Recommended as
+an additional flag for the Stage 1+2 generation-6 checkpoints alongside
+`--reclaim-islands`/`--repair-frames` (`--halo-ring-width 24 --halo-frame-darkness 40
+--halo-min-bubble-area 2000 --halo-min-background-area 8000` are the defaults). Production
+(`10.0-baseline.pt` + `--reclaim-islands`) stays untouched per the standing constraint. The
+one identified limitation (bubbles whose own ink outline has a genuine gap in the source
+scan) is specific and honestly documented, not a general failure mode. Full instance-by-
+instance numbers, visual verification, and methodology detail for both the training-side
+attempts and this postprocessing fix are in `.tmp/notes/halo_investigation.md`.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
