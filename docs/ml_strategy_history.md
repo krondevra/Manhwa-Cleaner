@@ -1612,6 +1612,88 @@ scan) is specific and honestly documented, not a general failure mode. Full inst
 instance numbers, visual verification, and methodology detail for both the training-side
 attempts and this postprocessing fix are in `.tmp/notes/halo_investigation.md`.
 
+**Combined-pipeline evaluation at full-chapter scale (2026-07-31)**: ran the full recommended
+flag set on complete `data/chapters-initial/001.png`/`002.png` (not just crops). Tracked
+5-instance numbers unchanged with `--reclaim-islands`/`--repair-frames` added (no
+interaction). Broader 20-crop sweep across both full chapters found 2 additional bubble
+instances beyond the tracked 5 closing cleanly (the fix generalizes past hand-picked cases),
+no new failure mode from combining all 3 postprocessing flags together for the first time,
+and correctly-behaving full-bleed splash panels/gutters/diagonal edges throughout. One
+relevant-but-out-of-scope observation: a small halo variant on an unenclosed SFX glyph stroke
+(`close_bubble_halo` only detects enclosed ink-outline shapes, so never reaches this) — noted
+for the Stage 3 SFX work below, not fixed here. **Stage 2 (with postprocessing) confirmed
+genuinely done.**
+
+**4th mechanism attempt, gated on a real diagnostic (2026-07-31)**: before attempting
+anything, ruled out the auxiliary SDT head as a candidate 4th mechanism — it's the same
+"boundary emphasis during training" class as this week's Attempt 2 and historically clauds'
+models 13.0/15.0, both already tried and already the subject of this doc's own explicit
+warning against a further lever in that class. Not attempted. The architectural/receptive-
+field hypothesis (all 4 guidance channels are local-only, ~200-220px computed receptive
+field) was undiagnosed, so before deciding whether to implement anything, built a bounded
+occlusion probe (`.tmp/diagnostics/halo_context_occlusion_probe.py`): on 2 unresponsive real
+instances, progressively occluded everything beyond radius 32/64/128/256px (and no
+occlusion) from the seed, re-ran raw inference, measured delete-probability at the halo. All
+occlusion levels — including full context — gave exactly 0.0000 delete-probability at every
+band, on both instances: the model already confidently predicts "keep" with almost no visible
+surroundings, so more context (up to and past its own receptive field) changes nothing. This
+directly falsifies "insufficient context" as the driver, further confirming the "near-bubble
+= keep" local-prior/shortcut explanation from a genuinely different angle (behavioral
+occlusion, not another training-attempt outcome). **No genuinely new, actionable training-
+side mechanism identified** — 4 independent approaches (3 training-side + this diagnostic)
+now confirm the hard wall. `--close-bubble-halo` remains the standing solution; no further
+training-side attempts planned without new evidence.
+
+### RESULT (quick_smoke-verified, scale-up deferred) — Stage 3 hollow-shape SFX-cleanup hypothesis (2026-07-31)
+
+With Stage 2 (training + `--close-bubble-halo` postprocessing) confirmed genuinely done above,
+implemented the first of the two queued Stage 3 hypotheses
+(`.tmp/notes/stage3_sfx_hypotheses.md`): hollow shapes (oval/square/trapezoid outline, plain
+interior) as an explicit training signal that an enclosed shape's interior is not always
+"keep" the way a bubble's is. The note's own precondition was explicit: a bare hollow shape
+would reproduce the skin_neck shortcut (ambiguous soft/light interior inside a bounded
+outline), so the implementation required a real structural differentiator, not just
+brightness/hue.
+
+**Implementation** (`PepperNCarrotDataset/src/synthesize/synthesize_curriculum.py`):
+`fill_sfx_hollow_interior` (a flat, near-white fill respecting `LIGHT_FILL_CEILING`),
+`render_hollow_sfx_shape` (PIL-drawn oval/square/trapezoid, border thickness 15-30% of the
+shape's own half-size — an order of magnitude thicker than a bubble outline's 1.5-6.5%, and
+never any text in the interior, unlike bubbles which always have `render_bubble_text` called
+on them — both structural, guidance-channel-visible cues, not textural ones), and
+`composite_hollow_sfx` (reuses `place_and_paste`'s placement/alpha-compositing, then
+explicitly corrects the interior back to delete=False afterward using the known shape
+geometry, since `place_and_paste` itself unconditionally marks opaque pixels keep=True and
+was not modified). Wired into `generate_sfx_page` alongside the existing asset-based
+`composite_sfx` path (unchanged), at a 45%-per-page chance of one instance, deliberately rare
+since this is a targeted augmentation, not dominant Stage 3 content.
+
+**Verification, full ladder**: `preflight_check.py --new-kind sfx_hollow_interior` —
+initially failed the contrast-band check (fill sampled up to 250, exceeding
+`LIGHT_FILL_CEILING=240`; fixed to sample `[200, 238]`), then all 3 checks passed clean,
+including the statistical-overlap check that was expected to flag risk — it didn't, this
+fill's brightness/hue turned out separable enough on its own. `run_ladder.sh` quick_smoke
+(250-tier, `--resume b2_full2k_finetune.pt --lr 3e-5`) trained cleanly, no NaN, best
+checkpoint val_loss 0.092. `regression_suite.py --pairwise` against the same
+`b2_full2k_finetune.pt` baseline: **26/27 checks passed** — the 1 failure is
+`ch1_sfx_text`, an already-accepted pre-existing Stage 1 limitation (see its own entry above),
+drifting modestly further (+0.029), not a new regression from this feature. **All 10 pairwise
+gaps passed**, including `sfx_vs_skin` (gap +0.027, well under the 0.15 threshold) — the
+specific skin_neck-shortcut signature this hypothesis was built to avoid was not reproduced.
+A targeted real-instance spot-check (a genuine styled SFX glyph in `ch001` with a solid white
+fill and thick dark outline — structurally similar to the synthetic training pattern, and
+exactly the kind of case that should stay fully "keep," not be treated as a hollow window)
+showed identical (fully-keep) behavior on both the pre- and post-quick_smoke checkpoints — no
+degradation on the real case this hypothesis's own risk was about.
+
+**Status: quick_smoke-verified, clean; 2k/10k scale-up deliberately deferred, not attempted.**
+This is a conservative stopping point given the scope already covered this session (halo
+investigation, full-chapter pipeline evaluation, the Part 2 diagnostic, and this Stage 3 work
+all in one day), not a finding of any problem — mirrors the existing "B3: decide on 10k Stage
+2 scale-up" open item's own precedent of leaving a scale-up decision as an explicit, separate
+step rather than auto-escalating. Hypothesis 2 (SFX-outline-merges-with-frame-border) remains
+untouched, still an open question per its own framing in `stage3_sfx_hypotheses.md`.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
