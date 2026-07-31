@@ -2,7 +2,7 @@
 
 Follow-up to the zero-shot CascadePSP probe (docs/ml_strategy_history.md,
 search "CascadePSP"; src/probe_cascadepsp.py). Full experiment design in
-.tmp/notes/cascadepsp_finetune_plan.md.
+notes/cascadepsp_finetune_plan.md.
 
 Data: data/refinement_pairs/{train,val}/*.jpg + *.png + *.strata.json,
 produced by src/export_cascadepsp_pairs.py from data/dataset_split_scaled/
@@ -60,7 +60,7 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CASCADEPSP = REPO_ROOT / "data" / "CascadePSP"
 if not CASCADEPSP.is_dir():
     sys.exit(
@@ -68,7 +68,7 @@ if not CASCADEPSP.is_dir():
         "Clone it first (third-party code, not committed to this repo):\n"
         "  git clone https://github.com/hkchengrex/CascadePSP.git data/CascadePSP\n"
         "Then apply the CPU/ROCm compat patch to models/sobel_op.py (removes two\n"
-        "hardcoded .cuda() calls) -- see .tmp/notes/cascadepsp_finetune_plan.md Phase 0."
+        "hardcoded .cuda() calls) -- see notes/cascadepsp_finetune_plan.md Phase 0."
     )
 sys.path.insert(0, str(CASCADEPSP))
 
@@ -296,7 +296,7 @@ def main() -> None:
             # Also save a per-step-numbered copy so a checkpoint sweep is possible
             # afterward -- the original 4000-step run overwrote the same --out path
             # every save, destroying all 15 intermediate checkpoints (see
-            # .tmp/notes/cascadepsp_finetune_next_steps_thinking.md option 1).
+            # notes/cascadepsp_finetune_next_steps_thinking.md option 1).
             stepped_path = out_path.with_suffix(f".step{step}{out_path.suffix}")
             torch.save(state, stepped_path)
             print(f"saved checkpoint: {out_path} and {stepped_path} (step {step})")

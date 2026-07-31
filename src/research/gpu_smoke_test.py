@@ -7,7 +7,7 @@ IMPORTANT: includes a BatchNorm2d layer on purpose. On gfx1151, MIOpen's JIT
 kernel compiler fails on BatchNorm specifically (miopenStatusUnknownError /
 "cannot compile inline asm") while a bare Conv2d passes -- so a conv-only
 smoke test gives false confidence (documented hardware lesson, see
-.tmp/notes/gpu_training_operational_gotchas.md and next_session_handoff.md).
+notes/gpu_training_operational_gotchas.md and next_session_handoff.md).
 """
 import time
 import torch

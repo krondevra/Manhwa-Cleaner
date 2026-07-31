@@ -19,7 +19,7 @@ refiner sees the same visual domain as the model it's refining.
 Also writes a <id>.strata.json sidecar per exported page with candidate
 crop-center coordinates for two content strata, for the stratified-sampling
 dataset in train_cascadepsp_pc.py (the single most important design
-detail in .tmp/notes/cascadepsp_finetune_plan.md -- the finetune must see
+detail in notes/cascadepsp_finetune_plan.md -- the finetune must see
 both the low-texture-interior failure mode and the boundary/gutter win
 case, not a content-blind uniform crop distribution):
   - "low_texture": centroids of large, low-local-contrast KEEP regions
@@ -45,10 +45,10 @@ import cv2
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from ml_cleaner import BASE_VARIANTS, OVERLAY_VARIANTS  # noqa: E402
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DATASET_SPLIT_SCALED = REPO_ROOT / "data" / "dataset_split_scaled"
 OUT_DIR = REPO_ROOT / "data" / "refinement_pairs"
 

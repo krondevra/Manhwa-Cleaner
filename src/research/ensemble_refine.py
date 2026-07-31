@@ -1,6 +1,6 @@
 """Ensemble combiner: CascadePSP zero-shot + P&C-finetuned refinement.
 
-Phase A of .tmp/notes/manual_clean_quality_plan.md. Goal: get closer to
+Phase A of notes/manual_clean_quality_plan.md. Goal: get closer to
 manual-clean quality by combining each checkpoint's strength --
 
 - CascadePSP zero-shot: excellent gutter/SFX-halo cleanup (near manual-clean),
@@ -9,7 +9,7 @@ manual-clean quality by combining each checkpoint's strength --
   fixes the art-carving problem, but gives back some of zero-shot's halo
   cleanup quality -- a rebalancing, not a clean win (see
   docs/ml_strategy_history.md, search "CascadePSP finetuned on P&C", and
-  .tmp/notes/cascadepsp_finetune_next_steps_thinking.md).
+  notes/cascadepsp_finetune_next_steps_thinking.md).
 
 Since the two failure modes are spatially near-disjoint (art damage happens
 INSIDE real content; leftover halos sit in gutter/background territory), a
@@ -48,7 +48,7 @@ import numpy as np
 from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 import torch  # noqa: E402

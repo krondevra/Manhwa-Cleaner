@@ -34,7 +34,7 @@ import numpy as np
 from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 import torch  # noqa: E402
@@ -66,7 +66,7 @@ SPOT_YS = [6800, 13800, 19100, 21700, 33200, 36700, 48800, 54650, 66900,
 SPOT_H = 900          # matches compare_models_video.py --crop-height
 MARGIN = 300          # context rows around each window for inference/refinement
 
-# Fixed clauds crop windows (.tmp/notes/clauds_regression_crops.md).
+# Fixed clauds crop windows (notes/clauds_regression_crops.md).
 CLAUDS = [("clauds_1", 169250, 450), ("clauds_2", 179450, 450), ("clauds_3", 54550, 500)]
 
 GT_BAND = 4000        # rows per band for full-chapter GT processing

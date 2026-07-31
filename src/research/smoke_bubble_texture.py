@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import cv2
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from ml_cleaner import (  # noqa: E402
     inject_bubble_interior_texture,
     BUBBLE_TEXTURE_DARK_FLOOR,

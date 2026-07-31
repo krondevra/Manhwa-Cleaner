@@ -1,4 +1,4 @@
-"""Style-analysis driver (Part 4, .tmp/notes/synthetic_curriculum_plan.md).
+"""Style-analysis driver (Part 4, notes/synthetic_curriculum_plan.md).
 
 Read-only, genre-level statistics only -- see src/style_analysis.py's module docstring
 for the constraint this must respect (never persist/reuse real contours/pixels downstream).

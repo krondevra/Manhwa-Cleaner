@@ -344,7 +344,7 @@ entirely, focus model 10.0 purely on white-bg. `BASE_VARIANTS`/
 Two isolating runs: `10.0-baseline` (this recipe, `--boundary-patch-ratio
 0.0`) and `10.0` (`--boundary-patch-ratio 0.5`, the first ever nonzero test
 of that flag). Evaluated on a new fixed crop set
-(`.tmp/notes/clauds_regression_crops.md`, 3 real "clauds" bubble instances)
+(`notes/clauds_regression_crops.md`, 3 real "clauds" bubble instances)
 plus the existing white-bg regression set.
 
 **Result: `10.0-baseline` alone (recipe simplification, no sampling
@@ -568,7 +568,7 @@ shared-placement-math confound between `sfx_w` and `ui_w` (both go through
 `ui_w`'s absolute value gives no sign of it.
 
 **Result: mixed, not a confirmation.** Evaluated on the 3 established clauds crops, 3 white-bg
-crops, 2 new dedicated real-SFX-on-white crops (`.tmp/notes/sfx_regression_crops.md`, built
+crops, 2 new dedicated real-SFX-on-white crops (`notes/sfx_regression_crops.md`, built
 specifically for this test since no existing crop set covers colored/gradient SFX), and a broad
 18-coordinate `compare_models_video.py --screenshots` spot-check, all against `10.0-baseline`
 with and without `--reclaim-islands`.
@@ -819,7 +819,7 @@ interaction flagged above first) rather than another single-shot attempt at a mi
 2026-07-22: first new experiment in the inference-postprocessing family since `--reclaim-islands`/
 `--protect-borders`. Idea (recalled by user from an earlier discussion, never previously written
 down): the model draws frame/bubble strokes cleanly, and per the manual-reference finding
-(`.tmp/notes/manual_reference_findings.md`) correct deletion is purely geometric — so any delete
+(`notes/manual_reference_findings.md`) correct deletion is purely geometric — so any delete
 pixel inside a region *fully enclosed by near-black strokes in the RGB* is wrong by definition and
 can be forced back to keep. Targets the two interior failure topologies islands can't reach by
 design: bites connected out to real background through other delete pixels, and keep-speck
@@ -876,7 +876,7 @@ ground truth rather than islands-cleaned pseudo-GT.
 
 ### PROBE (zero-shot, mixed — mechanism works, priors wrong) — CascadePSP pretrained refinement
 2026-07-22: first experiment from the `.tmp/INSPIRATION/` papers review (item 1 in
-`.tmp/notes/inspiration_papers_review.md`). Motivation: three independent trunk-side mechanisms
+`notes/inspiration_papers_review.md`). Motivation: three independent trunk-side mechanisms
 (capacity/12.0, boundary-loss/13.0, SDT/15.0) failed convergently on clauds — pointing at a
 mechanism OUTSIDE the trunk. CascadePSP (Cheng et al. 2020, github.com/hkchengrex/CascadePSP) is a
 class-agnostic refinement network (RGB + coarse mask → pixel-accurate mask), trained independently
@@ -939,7 +939,7 @@ white-bg-only production domain deliberately never touches).
 
 ### RESULT (positive, net improvement — not yet production-ready) — CascadePSP finetuned on P&C
 2026-07-22/23: the follow-up experiment the zero-shot probe's adjudication called for. Scoped in
-`.tmp/notes/cascadepsp_finetune_plan.md` (read that note for full design detail — training-pair
+`notes/cascadepsp_finetune_plan.md` (read that note for full design detail — training-pair
 generation, stratified sampling rationale, hardware/compat findings); this entry records the
 result. **Never trained on real manhwa** — P&C only, per the clarified policy above; manual-
 reference chapters 001/002 used only as held-out evaluation, same as every other checkpoint.
@@ -1050,7 +1050,7 @@ near-opposite ways — zero-shot cleans gutter/SFX halos well but carves real ar
 1.58%/2.58%); finetuned protects art well but leaves halos (under-del 10.61%/10.85%). Goal:
 a deterministic combiner that takes finetuned's output as the safe base and admits zero-shot's
 extra deletions only where they can't be real content, same philosophy as `--reclaim-islands`
-(cheap, deterministic, composable). Full plan: `.tmp/notes/manual_clean_quality_plan.md`.
+(cheap, deterministic, composable). Full plan: `notes/manual_clean_quality_plan.md`.
 
 **Design** (`src/ensemble_refine.py`): label connected components of finetuned's KEEP mask; for
 each component, compute the fraction of its pixels zero-shot marks DELETE. If that fraction
@@ -1121,7 +1121,7 @@ checkpoint dominate the tradeoff on its own, either as a production candidate or
 this same ensemble as a stronger "finetuned" input.
 
 Artifacts: `src/ensemble_refine.py` (tracked, commits 4.22.2 initial + 4.22.3 area-cap fix),
-`.tmp/ensemble_refine/` previews, `.tmp/notes/manual_clean_quality_plan.md` (full execution log).
+`.tmp/ensemble_refine/` previews, `notes/manual_clean_quality_plan.md` (full execution log).
 **Production recommendation unchanged: `10.0-baseline` + `--reclaim-islands`.**
 
 ### RESULT (informative, no actionable improvement — training is not reproducible here) — CascadePSP finetune checkpoint-sweep
@@ -1190,19 +1190,19 @@ useful tooling fix (checkpoint saves no longer silently overwrite each other) �
 as a poor cost/signal ratio in hindsight, not spun as a win. **No further checkpoint-selection or
 ensemble-parameter tuning is planned without new evidence** — a materially better result, if
 pursued, would need to address the training data itself (see Phase C in
-`.tmp/notes/manual_clean_quality_plan.md` — not started, requires explicit go-ahead given its own
+`notes/manual_clean_quality_plan.md` — not started, requires explicit go-ahead given its own
 much larger cost and unverified preconditions).
 
 Artifacts: `src/train_cascadepsp_pc.py` (4.22.1 fix, tracked), `.tmp/run_checkpoint_sweep_eval.sh`,
 `data/models/cascadepsp-pc-finetune-1.0-sweep.step{500,1000,...,4000}.pth` (gitignored, ~271MB
 each, reproducible from the script + P&C data + seed 7), `.tmp/sweep_step{N}/` previews,
-`.tmp/notes/manual_clean_quality_plan.md` (full execution log). **Production recommendation
+`notes/manual_clean_quality_plan.md` (full execution log). **Production recommendation
 unchanged: `10.0-baseline` + `--reclaim-islands`.**
 
 ### RESULT (SFX-exposure training pilot + GPU speed + first production integration point)
 2026-07-25: three threads from one overnight session, summarized here; full detail split across
-`.claude/plans/snazzy-cuddling-creek.md`, `.tmp/notes/cascadepsp_sfx_exposure_plan.md`, and
-`.tmp/notes/cascadepsp_production_integration_plan.md`.
+`.claude/plans/snazzy-cuddling-creek.md`, `notes/cascadepsp_sfx_exposure_plan.md`, and
+`notes/cascadepsp_production_integration_plan.md`.
 
 **GPU inference** (`--device cuda` added to `src/probe_cascadepsp.py`/`src/ensemble_refine.py`,
 commit 4.22.7): a real, substantial speedup nobody had tried — full-precision mode ~40-55min/chapter
@@ -1250,7 +1250,7 @@ who wants to try the alternative.
 ### FAILED (severe, informative, 4th confirmation of a known mechanism) — model 18.0, self-contained coarse+refine head (RefineHead)
 
 2026-07-25: after deciding against any third-party pretrained weights — including CascadePSP
-itself, closing that entire thread (`.tmp/notes/cascadepsp_production_integration_plan.md` stays
+itself, closing that entire thread (`notes/cascadepsp_production_integration_plan.md` stays
 as an opt-in, non-default option; not pursued further) — this experiment tried to reproduce
 CascadePSP's coarse-then-refine idea *inside* `SmallUNet`, entirely from scratch, trained only on
 Pepper & Carrot. Plan: `.claude/plans/snazzy-cuddling-creek.md`.
@@ -1268,7 +1268,7 @@ pilot (`src/train_refine_head.py`), `boundary_patch_ratio=0.5` (deliberately bia
 boundaries — the whole point of the head), loss dropped steadily 0.72→0.29 with the usual bounce,
 no plateau — a clean mechanical result on its own.
 
-**Qualitative check on the established hard-case crops (`.tmp/notes/white_bg_regression_crops.md`,
+**Qualitative check on the established hard-case crops (`notes/white_bg_regression_crops.md`,
 `sfx_regression_crops.md`, `src/probe_refine_head.py`, both heads run through the identical tiled
 `predict_delete_mask` + `--reclaim-islands` pipeline) told a different story: severe regression.**
 Across 5 windows, refined output flipped 70,430px keep→delete against only 33px the other way. Two
@@ -1321,7 +1321,7 @@ deliberately not scale-normalized — a CNN's kernels have a fixed absolute-pixe
 
 **Result: not supported.** P&C oval-bubble min-radius-of-curvature distribution (106 shapes):
 `[5,10,25,50,75,90]` percentiles = 7.4, 7.6, 10.9, 13.7, 16.6, 19.1px. The 3 already-documented,
-confirmed clauds defect instances (`.tmp/notes/clauds_regression_crops.md`, chapter `085.png`),
+confirmed clauds defect instances (`notes/clauds_regression_crops.md`, chapter `085.png`),
 ranked against that distribution: 11.4px (28th percentile), 14.2px (57th), 200.8px (100th — looser
 than every sampled P&C training bubble). **None of the 3 confirmed real-world failures are curvature
 outliers relative to training.** Verified by eye against the crop notes' own bubble-text descriptions
@@ -1330,7 +1330,7 @@ fixed in the process: the whole-page real-chapter aggregate also picks up rounde
 as "enclosed holes" (no clean size/shape cutoff separates them from real bubbles — confirmed areas
 overlap directly), so that aggregate was excluded from the conclusion; the per-instance clauds
 measurement doesn't share this problem (small, single-bubble-focused crops) and was checked visually
-before use. Full writeup: `.tmp/notes/bubble_curvature_check.md`.
+before use. Full writeup: `notes/bubble_curvature_check.md`.
 
 **This is the third bubble-shape-related hypothesis ruled out this session** — template diversity
 (dead code), corpus diversity (not starved), and now curvature range (not exceeded). Combined with
@@ -1338,7 +1338,7 @@ before use. Full writeup: `.tmp/notes/bubble_curvature_check.md`.
 16.0/17.0's resolution-mismatch attempts), the shape/geometry angle looks exhausted for now — no
 further bubble-shape-related lever is currently identified as worth trying without new evidence.
 
-**Direction check-in, same day** (`.tmp/notes/full_auto_direction_2026-07-25.md`): with this angle
+**Direction check-in, same day** (`notes/full_auto_direction_2026-07-25.md`): with this angle
 exhausted, asked directly rather than guessing from earlier, partly-superseded statements. Result:
 still targeting full automation (not settling for an assisted workflow), the third-party-weights
 policy is **narrowed, not reopened wholesale** — open to a cleanly, fully auditable MIT/CC-licensed
@@ -1408,7 +1408,7 @@ With RefineHead (self-contained, model 18.0), three bubble-shape/curvature hypot
 third-party refinement options exhausted, the user decided on a full pivot: no more P&C-composition
 tuning or third-party weights of any kind — a 100%-self-authored synthetic-data generator and
 staged curriculum training run instead (~2-3 day budget). Full plan:
-`.tmp/notes/synthetic_curriculum_plan.md`. Both third-party options investigated this session are
+`notes/synthetic_curriculum_plan.md`. Both third-party options investigated this session are
 closed out here as **deliberate, evidence-based rejections, not abandoned dead ends**:
 
 - **CascadePSP: rejected for licensing-provenance reasons, not quality.** Its P&C-finetuned
@@ -1441,7 +1441,7 @@ third-party weights) begins at `6.1.1`. See `docs/decisions.md` for the versioni
 
 ### Stage 1 (frames) accepted limitation: SFX-on-white-background over-deletion (2026-07-29)
 
-Stage 1 (frames-only diagnostic pipeline, closing checkpoint `.tmp/a6_full10k/a6_full10k.pt`)
+Stage 1 (frames-only diagnostic pipeline, closing checkpoint `.tmp/checkpoints/stage1/a6_full10k/a6_full10k.pt`)
 is marked done **with one documented open issue**, not fully clean, per the plan's decision
 gate (one focused diagnose+fix attempt max before accepting and moving on).
 
@@ -1470,13 +1470,13 @@ consistent with the training-scale-artifact hypothesis) via the 30k-scale full r
 planned for Part 6/7, and/or revisit whether this ROI structurally resembles the
 `ch1_caption_box_in_splash` finding (also isolated bordered/outlined content on a busy
 background) closed by Stage 2 bubble training — if so, an SFX-specific Stage may close both
-at once (see `.tmp/notes/stage3_sfx_hypotheses.md`'s hollow-shape hypothesis, which already
+at once (see `notes/stage3_sfx_hypotheses.md`'s hollow-shape hypothesis, which already
 flags this exact connection and its skin_neck-shortcut risk).
 
 **`ch1_caption_box_in_splash`: CONFIRMED CLOSED (2026-07-31), resolved by Stage 2 bubble
 training, already in production.** Re-verified directly against `regression_suite.py --cases
-ch1_caption_box_in_splash` on the actual production checkpoint (`b2_bubbles_2k_prestage/
-b2_full2k_finetune.pt`): PASS, prob=0.0262 (well under the 0.30 ceiling). A later false alarm
+ch1_caption_box_in_splash` on the actual production checkpoint (`.tmp/checkpoints/stage2/
+b2_bubbles_2k_prestage/b2_full2k_finetune.pt`): PASS, prob=0.0262 (well under the 0.30 ceiling). A later false alarm
 (the 2026-07-31 30k Stage 1 scale-up's regression check) compared two Stage-1-only checkpoints
 that were never expected to pass this ROI at all — see `synthetic_curriculum_plan.md`'s
 correction in its Part B section. No further action needed on this ROI.
@@ -1618,7 +1618,7 @@ an additional flag for the Stage 1+2 generation-6 checkpoints alongside
 one identified limitation (bubbles whose own ink outline has a genuine gap in the source
 scan) is specific and honestly documented, not a general failure mode. Full instance-by-
 instance numbers, visual verification, and methodology detail for both the training-side
-attempts and this postprocessing fix are in `.tmp/notes/halo_investigation.md`.
+attempts and this postprocessing fix are in `notes/halo_investigation.md`.
 
 **Combined-pipeline evaluation at full-chapter scale (2026-07-31)**: ran the full recommended
 flag set on complete `data/chapters-initial/001.png`/`002.png` (not just crops). Tracked
@@ -1656,7 +1656,7 @@ training-side attempts planned without new evidence.
 
 With Stage 2 (training + `--close-bubble-halo` postprocessing) confirmed genuinely done above,
 implemented the first of the two queued Stage 3 hypotheses
-(`.tmp/notes/stage3_sfx_hypotheses.md`): hollow shapes (oval/square/trapezoid outline, plain
+(`notes/stage3_sfx_hypotheses.md`): hollow shapes (oval/square/trapezoid outline, plain
 interior) as an explicit training signal that an enclosed shape's interior is not always
 "keep" the way a bubble's is. The note's own precondition was explicit: a bare hollow shape
 would reproduce the skin_neck shortcut (ambiguous soft/light interior inside a bounded
@@ -1704,7 +1704,7 @@ untouched, still an open question per its own framing in `stage3_sfx_hypotheses.
 
 ## Halo defect investigation: CLOSED (2026-08-01), 5 mechanisms tried and discarded
 
-Full detail throughout `.tmp/notes/halo_investigation.md`. Summary for future reference: the
+Full detail throughout `notes/halo_investigation.md`. Summary for future reference: the
 Stage 2 bubble-fine-tune halo defect (undeleted background band, 2-32px, around bubble/cloud
 contours, curvature-correlated) was investigated across **5 independent mechanisms**, spanning
 data-side, loss-side, architecture-side, and (twice) an independent-refiner approach:
@@ -1773,7 +1773,7 @@ The closure above was reached using `real_boundary_probe.py`'s default 600×600 
 around each seed point, not full-page (production) scale. Direct re-verification found this
 had already produced one wrong conclusion (inst3's "structurally undetectable" diagnosis was a
 crop-scale artifact — at full-page scale it IS detected and `close_bubble_halo` DOES help it).
-Triggered a full re-verification (`.tmp/notes/halo_investigation.md`, Part A): all 5 instances
+Triggered a full re-verification (`notes/halo_investigation.md`, Part A): all 5 instances
 re-measured at full-page scale (3/5 remain genuine zero-halo controls, confirmed), plus 2
 additional independent variables tested on the 5th mechanism that hadn't been isolated before —
 **crop-size** (inference-only 224→512, and a proper 512 retrain — both zero transfer) and

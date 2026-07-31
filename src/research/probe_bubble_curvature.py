@@ -49,7 +49,7 @@ import numpy as np
 from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 import cv2  # noqa: E402
@@ -74,7 +74,7 @@ GT_CHAPTERS = ["001", "002"]
 GT_DIR = ROOT / ".tmp" / "saved" / "chapters"
 
 CHAPTER_085 = ROOT / "data" / "chapters-initial" / "085.png"
-# .tmp/notes/clauds_regression_crops.md -- 3 confirmed, historically-documented defect
+# notes/clauds_regression_crops.md -- 3 confirmed, historically-documented defect
 # bubble instances. No manual GT exists for chapter 085 (checked: no
 # .tmp/saved/chapters/085*), so these are measured directly from the raw source art's
 # ink outline, same as the P&C/GT-chapter side.

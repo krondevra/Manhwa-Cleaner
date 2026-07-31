@@ -1547,7 +1547,7 @@ def repair_frame_interiors(
     a light interior) back to "keep".
 
     Premise, from the manually-cleaned reference chapters
-    (.tmp/notes/manual_reference_findings.md): correct deletion is purely
+    (notes/manual_reference_findings.md): correct deletion is purely
     geometric -- page gutter vs. panel -- and real background always runs out
     to the strip's edge. A light region *fully enclosed* by near-black pixels
     therefore cannot be background: gutters and margins always touch the
@@ -1645,7 +1645,7 @@ def close_bubble_halo(
     min_bubble_area: float,
     min_background_area: int,
 ) -> np.ndarray:
-    """2026-07-30 halo investigation (.tmp/notes/halo_investigation.md,
+    """2026-07-30 halo investigation (notes/halo_investigation.md,
     docs/ml_strategy_history.md): three training-side mechanisms (curvature-weighted patch
     sampling, boundary-aware loss reweighting at two radii, background-extent-aware patch
     sampling) all failed to close the curvature-correlated ~16-32px undeleted "keep" halo
@@ -1922,7 +1922,7 @@ def inject_bubble_interior_texture(
     frame_darkness: int = 40,
     min_bubble_area: float = 400,
 ) -> np.ndarray:
-    """2026-07-31 halo-investigation fallback (.tmp/notes/halo_investigation.md): bubble/cloud
+    """2026-07-31 halo-investigation fallback (notes/halo_investigation.md): bubble/cloud
     interiors are currently near-flat white (fill + rendered text only). The hypothesis: a
     flat, textureless interior gives the model too little local signal to distinguish
     "protected bubble interior" from "background that merely happens to be near-white too" --
@@ -2391,7 +2391,7 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
         "true-background delete region -- a geometric postprocessing fix for the "
         "curvature-correlated undeleted-halo defect around bubbles/clouds on Stage 2 "
         "checkpoints (three training-side fixes were tried and discarded; see "
-        ".tmp/notes/halo_investigation.md and docs/ml_strategy_history.md). The inverse "
+        "notes/halo_investigation.md and docs/ml_strategy_history.md). The inverse "
         "problem from --repair-frames (keep->delete in an exterior ring, not "
         "delete->keep in an enclosed interior); never touches real nearby content (not "
         "part of any delete component, so it fails the reach test for free) or small "
@@ -2459,7 +2459,7 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
         default="data/models/cascadepsp-sfx-pilot.step400.pth",
         help="CascadePSP checkpoint for --cascadepsp-refine. Default is this project's "
         "best-evaluated checkpoint as of 2026-07-25 (see "
-        ".tmp/notes/cascadepsp_production_integration_plan.md for why this one, not "
+        "notes/cascadepsp_production_integration_plan.md for why this one, not "
         "the marginally-higher-aggregate-score step600 checkpoint -- step600 has a "
         "real, visually-confirmed small-content-deletion defect this one doesn't).",
     )

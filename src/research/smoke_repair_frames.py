@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import cv2
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 from ml_cleaner import repair_frame_interiors  # noqa: E402
 
 H, W = 900, 600

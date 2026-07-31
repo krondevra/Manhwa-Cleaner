@@ -41,7 +41,7 @@ separately in the first place).
   `ml_strategy_history.md` "Generation 6 pivot").
 - **6**: full pivot to a self-synthesized training pipeline — no P&C
   composition tuning, no third-party pretrained weights of any kind. Starts
-  at `6.1.1`. Plan: `.tmp/notes/synthetic_curriculum_plan.md`.
+  at `6.1.1`. Plan: `notes/synthetic_curriculum_plan.md`.
 
 **Generation 5 is reserved and intentionally absent from `main`**: it is
 exclusively the `archive` branch's label for these same CascadePSP/ToonOut
@@ -60,7 +60,7 @@ generation 4 per the boundaries above. Old pre-rewrite hashes are
 preserved on branch `backup/pre-restructure-2026-07-23` — nothing was
 deleted, only the commit messages changed (content diff between the
 backup branch and the rewritten history is empty). Full record:
-`.tmp/notes/restructure_2026-07-23_plan.md`. Reference commits by version
+`notes/restructure_2026-07-23_plan.md`. Reference commits by version
 number from this point forward, not by hash, since a rewrite changes every
 descendant hash.
 

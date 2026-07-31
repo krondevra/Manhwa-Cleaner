@@ -1,5 +1,5 @@
 """Two-directional GT eval for a generation-6 pivot checkpoint (Part 7,
-.tmp/notes/synthetic_curriculum_plan.md), against the manual-reference chapters
+notes/synthetic_curriculum_plan.md), against the manual-reference chapters
 (001, 002) -- investigation-only use of the human-cleaned references, never training data.
 
 No banding/MARGIN logic needed (Part 3's correction): predict_delete_mask already tiles
@@ -25,7 +25,7 @@ import numpy as np
 from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 import torch  # noqa: E402

@@ -1,11 +1,11 @@
-"""Reusable style-analysis primitives (Part 4, .tmp/notes/synthetic_curriculum_plan.md).
+"""Reusable style-analysis primitives (Part 4, notes/synthetic_curriculum_plan.md).
 
 Lifted and extended from src/probe_bubble_curvature.py's one-off inline logic (the
 flood-fill-from-corner enclosed-hole detector, shared with src/ml_cleaner.py's
 repair_frame_interiors, and the curvature/contour measurement code), plus a new frame/
 bubble split and a 5-family shape taxonomy (oval, cloud/thought, spiky/"sea urchin", thorn,
 rectangle -- standard in published comic/balloon-segmentation work, see
-.tmp/notes/inspiration_papers_review.md's Dubray & Laubrock reference) needed for the
+notes/inspiration_papers_review.md's Dubray & Laubrock reference) needed for the
 generation-6 synthetic-generator style analysis.
 
 Read-only analysis code: extracts AGGREGATE STATISTICS only. Callers must never persist or

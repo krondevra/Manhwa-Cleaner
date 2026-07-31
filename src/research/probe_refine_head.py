@@ -7,7 +7,7 @@ and its refined output (self-consistent inference-time path: refine_head
 corrects the model's OWN coarse logits, not a synthetic training-time
 substitute) through the same tiled inference + --reclaim-islands pipeline
 `ml_cleaner.py process` uses, on the project's established hard-case crop
-sets (.tmp/notes/white_bg_regression_crops.md, sfx_regression_crops.md) --
+sets (notes/white_bg_regression_crops.md, sfx_regression_crops.md) --
 reused rather than reinvented, per the plan's evaluation section.
 
 Each window is processed with MARGIN=300px of context on each side, matching
@@ -29,7 +29,7 @@ import numpy as np
 from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 import torch  # noqa: E402
@@ -50,7 +50,7 @@ OUT = ROOT / ".tmp" / "refine_head_probe"
 CHAPTER_085 = ROOT / "data/chapters-initial/085.png"
 MARGIN = 300  # matches probe_cascadepsp.py's MARGIN -- methodology lesson #10
 
-# .tmp/notes/white_bg_regression_crops.md + sfx_regression_crops.md
+# notes/white_bg_regression_crops.md + sfx_regression_crops.md
 CROPS = [
     ("white_A_bubble_on_white", 78000, 1000),
     ("white_B_bubble_panel_gutter", 101000, 1500),

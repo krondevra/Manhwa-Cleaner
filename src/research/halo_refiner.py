@@ -29,8 +29,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 
-REPO_ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(REPO_ROOT))
+SRC_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SRC_ROOT))
 from ml_cleaner import DoubleConv, crop_with_padding, find_dataset_pairs, read_rgb, read_rgba  # noqa: E402
 from style_analysis import extract_enclosed_holes  # noqa: E402
 
@@ -270,7 +270,7 @@ class HaloRefinerCropDataset(Dataset):
 
 
 # ---------------------------------------------------------------------------
-# Priority 1 (2026-08-01 autonomous continuation, .tmp/notes/halo_refiner_autonomous_log.md):
+# Priority 1 (2026-08-01 autonomous continuation, notes/halo_refiner_autonomous_log.md):
 # the perturbation-based dataset above trained a refiner that perfectly reversed its OWN
 # synthesize_halo_perturbation function but showed ZERO transfer to a differently-constructed
 # synthetic test or any real instance -- diagnosed as overfitting to that function's specific

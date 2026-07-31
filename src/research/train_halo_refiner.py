@@ -16,8 +16,9 @@ import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(REPO_ROOT))
+SRC_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SRC_ROOT))
+REPO_ROOT = SRC_ROOT.parent
 
 import numpy as np
 import torch
@@ -77,7 +78,7 @@ def flip_ratio_report(model: torch.nn.Module, loader: DataLoader, device: torch.
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", type=Path, default=REPO_ROOT.parent / ".tmp/b2_bubbles_2k_prestage/train_root")
+    ap.add_argument("--dataset", type=Path, default=REPO_ROOT / ".tmp/datasets/b2_bubbles_2k_prestage/train_root")
     ap.add_argument("--variant", type=str, default="bubbles")
     ap.add_argument("--n-train", type=int, default=300, help="number of source pairs for train split")
     ap.add_argument("--n-val", type=int, default=60, help="number of source pairs for val split")
@@ -95,7 +96,7 @@ def main():
                      "predicted errors vs. clean GT (Priority 1, autonomous continuation, "
                      "2026-08-01) -- requires --source-checkpoint.")
     ap.add_argument("--source-checkpoint", type=Path,
-                     default=REPO_ROOT.parent / ".tmp/b2_bubbles_2k_prestage/b2_full2k_finetune.pt",
+                     default=REPO_ROOT / ".tmp/checkpoints/stage2/b2_bubbles_2k_prestage/b2_full2k_finetune.pt",
                      help="Stage1+2 checkpoint to generate real-error pairs from, only used "
                      "when --data-source=real-error.")
     ap.add_argument("--pred-cache", type=Path, default=None,

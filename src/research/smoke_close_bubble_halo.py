@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import cv2
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "src"))
 from ml_cleaner import close_bubble_halo  # noqa: E402
 
 RING_WIDTH = 24

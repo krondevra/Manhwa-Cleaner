@@ -37,10 +37,14 @@ a new ML experiment).
 
 ## Layout
 ```text
-src/        current pipeline scripts (longify, split, merge, cut_samples,
-            ml_cleaner, evaluate, compare, compare_models_video)
-docs/       command reference (docs/readme.md), strategy history
-            (docs/ml_strategy_history.md)
+src/            production pipeline scripts (longify, split, merge, cut_samples,
+                ml_cleaner, evaluate, compare, style_analysis, run_style_analysis)
+src/research/   probes, training scripts, and one-off eval/smoke tools not part
+                of the standard cleaning workflow (compare_models_video and others)
+docs/           command reference (docs/readme.md), strategy history
+                (docs/ml_strategy_history.md)
+notes/          private planning/investigation notes (gitignored, not in the
+                public repo)
 ```
 
 `data/` (dataset, chapter images, trained checkpoints under `data/models/`)
