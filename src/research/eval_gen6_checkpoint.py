@@ -13,7 +13,7 @@ computed production (10.0-baseline) number in the same run for a fair, same-inst
 comparison rather than trusting an old recorded figure.
 
 Usage:
-  .venv-gpu/bin/python src/eval_gen6_checkpoint.py --model data/models/gen6-stage1.pt
+  .venv-gpu/bin/python src/research/eval_gen6_checkpoint.py --model data/models/18.0-frames.pt
 """
 from __future__ import annotations
 

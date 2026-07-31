@@ -64,6 +64,24 @@ backup branch and the rewritten history is empty). Full record:
 number from this point forward, not by hash, since a rewrite changes every
 descendant hash.
 
+### 2026-08-01: `N.X` two-part break (`6.4`-`6.7`), not rewritten
+Every commit from `1.1.1` through `6.3.3` (`ef59b59`) follows the
+three-part `N.XX.YY` scheme with no exceptions. Starting at `5c8d28f`
+("`6.4`: halo defect investigation..."), the `.YY` component was dropped
+entirely — not a skipped number, a structural regression to bare `N.X` —
+and the break persisted uncorrected through `6.5`, `6.6`, and `6.7`
+(current HEAD as of this note). Per policy, **this is not being rewritten**
+(unlike the 2026-07-23 gap above, which was a mechanical oversight caught
+immediately; this one shipped and was built on top of). Going forward:
+- Three-part `N.XX.YY` resumes starting with the next commit.
+- `6.4`-`6.7` are treated as implicitly single-version entries (`XX` = 4,
+  5, 6, 7 respectively, `YY` = 1 each) for the sole purpose of deriving
+  future numbers — i.e. the next brand-new feature commit is `6.8.1`; a
+  direct follow-up specifically to the `6.7` cleanup work would be `6.7.2`.
+- This mirrors the existing "bugfixes reuse `XX` with `YY+1`" rule above;
+  no new rule was invented, the two-part commits are just read as if their
+  omitted `.1` were implicit.
+
 ## File collapsing
 - Gen1's separately-numbered file versions were collapsed into single
   evolving files (`remove_manhwa_bg.py`, `cleaner.py`), so history shows
@@ -79,6 +97,44 @@ descendant hash.
   produced them was kept.
 - `.gitignore` updated afterward so regenerated `models/` and `reports/`
   stay untracked going forward.
+
+## Model file naming convention
+Separate from the `N.XX.YY` **commit-message** scheme above — this is a
+different numbering system for `data/models/` **files**, don't conflate
+the two.
+- Sequential `N.0` in `data/models/`, continuing from the last used number.
+  `1.0` through `17.0` cover generations 1-5; `18.0` starts the
+  generation-6 synthetic-pivot era (`18.0-frames.pt`, promoted from
+  `.tmp/checkpoints/stage1/a6_full10k/a6_full10k.pt`, the checkpoint
+  documented as the standing Stage 1 baseline in `ml_strategy_history.md`
+  and `notes/synthetic_curriculum_plan.md` — not
+  `data/models/gen6-stage1.pt`, an earlier, pre-bugfix run of the same
+  stage that was never adopted and has been deleted).
+- A descriptive suffix (`-frames`, `-bubbles`, `-sfx`, ...) is added only
+  when a checkpoint needs distinguishing, naming the single thing that
+  version isolates — same pattern as existing suffixes: `-strips`
+  (manhwa-scroll dataset restructuring), `-boundaryloss` (boundary-weighted
+  loss), `-sdt` (auxiliary signed-distance-transform head), `-baseline`
+  (recipe-simplification control run). Plain `N.0` with no suffix is for
+  checkpoints that don't introduce a new named experimental variable
+  relative to the prior one. Established pattern for the gen-6 stage
+  checkpoints specifically: `18.0-frames` (Stage 1), `18.1-bubbles` (Stage
+  2, once promoted), `18.2-sfx` (Stage 3, once promoted) — not created yet,
+  Stage 2/3 aren't adopted baselines as of this note.
+- Per-epoch training savepoints (`*.epochN.pt`) never live in
+  `data/models/` — they belong under `.tmp/checkpoints/<name>/`, alongside
+  the full training history for that run (see the 2026-08 `.tmp/`
+  restructuring). `data/models/` holds only the one promoted, versioned
+  checkpoint per release.
+- `cascadepsp-*` and `black-1.0` are deliberately separate naming
+  lineages, not part of the main `N.0` sequence: `cascadepsp-*` is
+  excluded from git tracking entirely (`.gitignore`: exceeds GitHub's
+  100MB limit, and was rejected on licensing-provenance grounds regardless
+  of measured quality); `black-1.0` was called out in
+  `ml_strategy_history.md` as a "new naming lineage, not part of the
+  white-bg `N.0` series" when it was created, since it's trained on a
+  disjoint black-background-only composition rather than being a variant
+  of the white-bg recipe the `N.0` sequence otherwise tracks.
 
 ## Identity and attribution
 - All commit author/committer identity unified to a single name/email,
