@@ -96,11 +96,11 @@ def curvature_radii(resampled: np.ndarray, arc_step: float, window_px: float) ->
     return np.clip(radii, 0.0, 1e4)
 
 
-def radial_bump_count(resampled: np.ndarray) -> int:
-    """Count outward protrusions ("bumps"/rays) via local maxima of
-    distance-from-centroid over the resampled contour, non-max-suppressed
-    against neighbors within ~8% of the contour's own sample count so nearby
-    noisy peaks don't get double-counted."""
+def find_bump_peaks(resampled: np.ndarray) -> list[int]:
+    """Indices into `resampled` of local maxima of distance-from-centroid,
+    non-max-suppressed against neighbors within ~8% of the contour's own sample
+    count so nearby noisy peaks don't get double-counted. Shared peak-finding
+    logic behind radial_bump_count and measure_tail (2026-07-28)."""
     c = resampled.mean(axis=0)
     d = np.hypot(resampled[:, 0] - c[0], resampled[:, 1] - c[1])
     n = len(d)
@@ -117,7 +117,76 @@ def radial_bump_count(resampled: np.ndarray) -> int:
     for i in peaks:
         if all(min((i - p) % n, (p - i) % n) > win for p in deduped):
             deduped.append(i)
-    return len(deduped)
+    return deduped
+
+
+def radial_bump_count(resampled: np.ndarray) -> int:
+    """Count outward protrusions ("bumps"/rays) via local maxima of
+    distance-from-centroid over the resampled contour, non-max-suppressed
+    against neighbors within ~8% of the contour's own sample count so nearby
+    noisy peaks don't get double-counted."""
+    return len(find_bump_peaks(resampled))
+
+
+def measure_tail(resampled: np.ndarray, radii: np.ndarray) -> Optional[dict]:
+    """For a shape with exactly one dominant bump (the tail-candidate signature
+    already used by the 'thorn' classification: bumps in (1,2) with one radius
+    clearly dominant), measure the tail's length and tip sharpness -- the two axes
+    explicitly requested for the new bubble generator's tail variety (2026-07-28):
+    short vs. long (tail_length_ratio: tip distance from centroid, normalized by
+    the body's own typical radius so it's comparable across bubble sizes) and
+    pointed vs. rounded tip (tip_curvature_radius_norm: the SAME discrete
+    radius-of-curvature already computed for classification, evaluated at the
+    peak sample -- a sharp point turns direction quickly over a short arc, which
+    curvature_radii's arc/angle formula reports as a SMALL radius; a rounded tip
+    turns more gradually, reporting a LARGER radius. No new geometry primitive
+    needed -- both measurements reuse resample_contour/curvature_radii's existing
+    output, just evaluated at the bump peak instead of aggregated across the
+    whole contour.
+
+    find_bump_peaks' centroid (the plain mean of resampled points, shared with
+    the already-calibrated classification logic -- deliberately not changed
+    here) shifts noticeably toward a long tail, which can make the body's own
+    far side register as a second, spurious "peak" simply because it's now
+    farther from the shifted mean, not because it's a real second protrusion.
+    Tested directly against synthetic shapes with a known single tail
+    (2026-07-28): the spurious peak's raw DISTANCE can be nearly identical to
+    the real tail tip's (confirmed one case at a 1.02x ratio -- a distance-ratio
+    filter would have rejected it), but its local CURVATURE never is -- the
+    spurious peak sits on the body's ordinary smooth boundary (measured
+    curvature radius ~150px in testing) while a genuine tail tip is a real
+    directional discontinuity (~7-9px in the same tests), independent of how
+    close the two points' distances happen to be. Real thorn shapes are already
+    classified allowing exactly this `bumps in (1, 2)` case, so when there are
+    exactly 2 peaks, treat the one with clearly sharper curvature (<0.5x the
+    other's radius) as the tail; if neither is clearly sharper, the shape
+    genuinely has two comparable protrusions and isn't safely reducible to one
+    tail measurement, so still return None rather than guessing."""
+    peaks = find_bump_peaks(resampled)
+    if len(peaks) == 1:
+        peak_idx = peaks[0]
+    elif len(peaks) == 2:
+        r_peaks = [float(radii[p]) for p in peaks]
+        lo, hi = sorted(r_peaks)
+        if hi < 1e-6 or lo / hi > 0.5:
+            return None
+        peak_idx = peaks[r_peaks.index(lo)]
+    else:
+        return None
+    c = resampled.mean(axis=0)
+    d = np.hypot(resampled[:, 0] - c[0], resampled[:, 1] - c[1])
+    n = len(d)
+    win = max(2, n // 12)
+    body_idx = [i for i in range(n) if min((i - peak_idx) % n, (peak_idx - i) % n) > win]
+    if not body_idx:
+        return None
+    body_radius = float(np.median(d[body_idx]))
+    if body_radius < 1e-6:
+        return None
+    return {
+        "tail_length_ratio": float(d[peak_idx] / body_radius),
+        "tip_curvature_radius_norm": float(radii[peak_idx] / body_radius),
+    }
 
 
 # ── shape classification (5-family taxonomy) ────────────────────────────────
@@ -177,11 +246,15 @@ def classify_and_measure(contour: np.ndarray, page_w: int, page_h: int,
     else:
         shape_class = "other"
 
+    tail = measure_tail(resampled, radii) if not is_frame and shape_class in ("thorn", "oval", "cloud") else None
+
     return {
         "area": float(area), "aspect": float(aspect), "solidity": float(solidity),
         "jaggedness": float(jaggedness), "bumps": int(bumps), "n_vertices": int(n_vertices),
         "min_radius": float(np.min(radii)), "p10_radius": float(np.percentile(radii, 10)),
         "p50_radius": float(np.percentile(radii, 50)),
+        "tail_length_ratio": tail["tail_length_ratio"] if tail else None,
+        "tip_curvature_radius_norm": tail["tip_curvature_radius_norm"] if tail else None,
         "bbox": (int(x), int(y), int(cw), int(ch)), "is_frame": bool(is_frame),
         "class": shape_class, "contour": contour,
     }

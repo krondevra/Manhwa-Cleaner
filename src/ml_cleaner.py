@@ -759,6 +759,7 @@ class PatchDataset(Dataset):
         curvature_top_frac: float = 0.4,
         background_patch_ratio: float = 0.0,
         background_min_area_frac: float = 0.05,
+        bubble_texture_prob: float = 0.0,
     ) -> None:
         self.pairs = pairs
         self.alpha_threshold = alpha_threshold
@@ -780,6 +781,7 @@ class PatchDataset(Dataset):
         self.curvature_top_frac = curvature_top_frac
         self.background_patch_ratio = background_patch_ratio
         self.background_min_area_frac = background_min_area_frac
+        self.bubble_texture_prob = bubble_texture_prob
         self._cache: "OrderedDict[int, Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[Tuple[np.ndarray, np.ndarray]], Optional[Tuple[np.ndarray, np.ndarray]], Optional[Tuple[np.ndarray, np.ndarray]], Optional[Tuple[np.ndarray, np.ndarray]]]]" = OrderedDict()
 
     def __len__(self) -> int:
@@ -968,6 +970,10 @@ class PatchDataset(Dataset):
             if want_positive and int(mask_crop.sum()) < self.min_positive_pixels:
                 continue
 
+            if self.bubble_texture_prob > 0.0:
+                arr_crop = inject_bubble_interior_texture(
+                    arr_crop, mask_crop, random, self.bubble_texture_prob)
+
             weight_crop = self._weight_crop(boundary_crop)
             sdt_crop = self._sdt_crop(mask_crop)
             if self.scale_jitter > 0.0:
@@ -989,6 +995,9 @@ class PatchDataset(Dataset):
         y0 = random.randint(0, max(0, h - ps))
         x0 = random.randint(0, max(0, w - ps))
         arr_crop, mask_crop, boundary_crop = crop_with_padding(arr, mask, x0, y0, ps, boundary)
+        if self.bubble_texture_prob > 0.0:
+            arr_crop = inject_bubble_interior_texture(
+                arr_crop, mask_crop, random, self.bubble_texture_prob)
         weight_crop = self._weight_crop(boundary_crop)
         sdt_crop = self._sdt_crop(mask_crop)
         if self.scale_jitter > 0.0:
@@ -1075,6 +1084,7 @@ def train_command(args: argparse.Namespace) -> None:
         curvature_top_frac=args.curvature_top_frac,
         background_patch_ratio=args.background_patch_ratio,
         background_min_area_frac=args.background_min_area_frac,
+        bubble_texture_prob=args.bubble_texture_prob,
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers, pin_memory=(device.type == "cuda"), drop_last=True)
 
@@ -1100,6 +1110,7 @@ def train_command(args: argparse.Namespace) -> None:
             curvature_top_frac=args.curvature_top_frac,
             background_patch_ratio=args.background_patch_ratio,
             background_min_area_frac=args.background_min_area_frac,
+            bubble_texture_prob=args.bubble_texture_prob,
         )
         val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
 
@@ -1144,6 +1155,7 @@ def train_command(args: argparse.Namespace) -> None:
                 curvature_top_frac=args.curvature_top_frac,
                 background_patch_ratio=args.background_patch_ratio,
                 background_min_area_frac=args.background_min_area_frac,
+                bubble_texture_prob=args.bubble_texture_prob,
             )
             variant_val_loaders[variant] = DataLoader(
                 v_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, drop_last=True)
@@ -1691,6 +1703,20 @@ def close_bubble_halo(
     h, w = delete_mask.shape
     shape_classes = {"oval", "thorn", "cloud", "spiky"}
 
+    # 2026-08-01 halo investigation Part 0: tested widening this 5x5 kernel (up to 35x35) to
+    # tolerate a small anti-aliasing/compression gap in a bubble's own ink outline -- found
+    # ZERO benefit at any tested size, on any of the 5 tracked real instances. Root cause for
+    # the one instance that stays unfixed (inst3): its outline is NOT gapped at all -- it's a
+    # fully closed loop whose tail happens to touch an unrelated horizontal panel-divider line,
+    # merging the bubble's stroke component with that far-reaching structure, which breaks the
+    # whole-component "enclosed" flood-fill test regardless of closing radius (confirmed via
+    # direct Pass-1 instrumentation, .tmp/diagnostics/halo_gap_tolerance_sweep.py). A follow-up
+    # attempt to strip wide (panel-border-like) components from the stroke mask before
+    # flood-fill was also tried and made things WORSE (broke inst1's already-working
+    # detection, since a real bubble's own merged component can legitimately have a wide
+    # bounding box for unrelated reasons) -- not adopted. See halo_investigation.md's Part 0
+    # section for full numbers. Kept as a fixed 5x5 (no parametrization added, since nothing
+    # this session found a value worth exposing).
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     stroke = (gray <= frame_darkness).astype(np.uint8)
     stroke_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
@@ -1802,6 +1828,222 @@ def close_bubble_halo(
         region[ring_zone & bg_reach] = True
 
     return fixed
+
+
+# Must stay in sync with PepperNCarrotDataset/src/synthesize/synthesize_curriculum.py's own
+# DARK_FILL_FLOOR/LIGHT_FILL_CEILING (2026-07-31 halo-investigation fallback: bubble-interior
+# texture augmentation lives entirely in this file, per the "no more PepperNCarrotDataset
+# edits" policy, so these constants are duplicated rather than imported).
+BUBBLE_TEXTURE_DARK_FLOOR = 55
+BUBBLE_TEXTURE_LIGHT_CEILING = 240
+BUBBLE_TEXTURE_INK_THRESHOLD = 140  # matches style_analysis.TEXT_INK_THRESHOLD
+
+
+def _texture_light_hatching(h: int, w: int, rng: random.Random) -> np.ndarray:
+    base = rng.randint(200, BUBBLE_TEXTURE_LIGHT_CEILING - 10)
+    line_val = rng.randint(BUBBLE_TEXTURE_DARK_FLOOR + 20, base - 15)
+    spacing = rng.randint(10, 24)
+    thickness = 1
+    angle = rng.uniform(0, np.pi)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    proj = xx * np.cos(angle) + yy * np.sin(angle)
+    lines = (np.mod(proj, spacing) < thickness)
+    gray = np.where(lines, line_val, base).astype(np.float32)
+    return np.repeat(gray[:, :, None], 3, axis=2).astype(np.uint8)
+
+
+def _texture_light_noise(h: int, w: int, rng: random.Random) -> np.ndarray:
+    base = rng.randint(200, BUBBLE_TEXTURE_LIGHT_CEILING - 15)
+    amp = rng.uniform(4.0, 12.0)
+    local_rng = np.random.RandomState(rng.randint(0, 2**31 - 1))
+    noise = local_rng.normal(base, amp, size=(h, w)).clip(
+        BUBBLE_TEXTURE_DARK_FLOOR + 10, BUBBLE_TEXTURE_LIGHT_CEILING - 2
+    )
+    return np.repeat(noise[:, :, None], 3, axis=2).astype(np.uint8)
+
+
+def _texture_light_halftone(h: int, w: int, rng: random.Random) -> np.ndarray:
+    base = rng.randint(210, BUBBLE_TEXTURE_LIGHT_CEILING - 5)
+    dot_val = rng.randint(BUBBLE_TEXTURE_DARK_FLOOR + 30, base - 20)
+    spacing = rng.randint(10, 20)
+    radius = spacing * rng.uniform(0.15, 0.28)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    cx = np.mod(xx, spacing) - spacing / 2
+    cy = np.mod(yy, spacing) - spacing / 2
+    dots = (cx * cx + cy * cy) < radius * radius
+    gray = np.where(dots, dot_val, base).astype(np.float32)
+    return np.repeat(gray[:, :, None], 3, axis=2).astype(np.uint8)
+
+
+_BUBBLE_TEXTURE_FNS = [_texture_light_hatching, _texture_light_noise, _texture_light_halftone]
+
+
+def _find_bubble_interior_holes(
+    gray: np.ndarray, frame_darkness: int, min_bubble_area: float,
+) -> list[dict]:
+    """Same flood-fill-from-corner enclosed-hole detection as close_bubble_halo's Pass 1
+    (reused read-only, not modified), simplified: no ring/background-reach logic needed here
+    since this only repaints RGB pixels already, correctly, labeled keep -- it never touches
+    the ground-truth mask. Returns a list of {"contour", "bbox"} dicts for accepted bubble/
+    cloud-family holes (oval/thorn/cloud/spiky, same taxonomy close_bubble_halo filters on)."""
+    h, w = gray.shape
+    shape_classes = {"oval", "thorn", "cloud", "spiky"}
+    stroke = (gray <= frame_darkness).astype(np.uint8)
+    stroke_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    stroke = cv2.morphologyEx(stroke, cv2.MORPH_CLOSE, stroke_kernel, iterations=1)
+    num_stroke, stroke_labels, stroke_stats, _ = cv2.connectedComponentsWithStats(stroke, connectivity=8)
+
+    found = []
+    for label in range(1, num_stroke):
+        sx, sy, scw, sch, _s_area = stroke_stats[label]
+        comp = (stroke_labels[sy:sy + sch, sx:sx + scw] == label).astype(np.uint8)
+        padded = np.zeros((sch + 2, scw + 2), dtype=np.uint8)
+        padded[1:-1, 1:-1] = comp
+        ff_mask = np.zeros((sch + 4, scw + 4), dtype=np.uint8)
+        cv2.floodFill(padded, ff_mask, (0, 0), 1)
+        holes = (padded[1:-1, 1:-1] == 0).astype(np.uint8)
+        if not holes.any():
+            continue
+        hole_contours, _ = cv2.findContours(holes, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        for hole_contour in hole_contours:
+            hole_contour = hole_contour + np.array([sx, sy])
+            info = classify_and_measure(hole_contour, w, h, min_area=min_bubble_area)
+            if info is None or info["is_frame"] or info["class"] not in shape_classes:
+                continue
+            found.append({"contour": hole_contour, "bbox": info["bbox"]})
+    return found
+
+
+def inject_bubble_interior_texture(
+    arr_crop: np.ndarray,
+    mask_crop: np.ndarray,
+    rng: random.Random,
+    prob: float,
+    frame_darkness: int = 40,
+    min_bubble_area: float = 400,
+) -> np.ndarray:
+    """2026-07-31 halo-investigation fallback (.tmp/notes/halo_investigation.md): bubble/cloud
+    interiors are currently near-flat white (fill + rendered text only). The hypothesis: a
+    flat, textureless interior gives the model too little local signal to distinguish
+    "protected bubble interior" from "background that merely happens to be near-white too" --
+    the boundary alone carries most of the burden. This injects mild texture (hatching/noise/
+    halftone, all within the same DARK_FILL_FLOOR/LIGHT_FILL_CEILING safety band frame
+    interiors already use) into detected bubble interiors at training-patch time, as a pure
+    RGB appearance change -- `mask_crop` (ground truth) is never read for writing and never
+    modified, only used indirectly via `gray` derived from `arr_crop` itself, so this cannot
+    introduce label noise by construction. A no-op at `prob=0.0` (the default), matching the
+    project's `curvature_patch_ratio`/`background_patch_ratio` convention for optional,
+    off-by-default data-side augmentations.
+
+    Implemented entirely in this file (not the synthetic generator) per the "no more
+    PepperNCarrotDataset edits" policy -- reuses close_bubble_halo's own flood-fill enclosed-
+    hole technique and style_analysis.classify_and_measure, both already built and verified,
+    applied read-only here (no changes to either).
+
+    2026-08-01 bugfix: `arr_crop` here is NOT plain 3-channel RGB -- `PatchDataset._get`
+    stores the full `in_channels`-wide model input (RGB + guidance channels from
+    `make_guidance_channels`/`build_input_tensor`, 7 channels total per `data/models/2.0.json`'s
+    `in_channels`), so `cv2.cvtColor(arr_crop, COLOR_RGB2GRAY)` crashed with "Invalid number of
+    channels ... 'scn' is 7" the first time this was actually run in `run_ladder.sh`'s
+    quick_smoke tier. Fixed by explicitly slicing the first 3 (RGB) channels for the
+    gray-derivation/hole-detection step, and writing the texture only into those same first 3
+    channels -- the guidance channels are derived from the RGB anyway (re-thresholded/re-edged
+    from it during the next `load_pair` call, not carried forward per-patch), so leaving them
+    untouched here does not create a stale-guidance-vs-new-RGB mismatch."""
+    if prob <= 0.0:
+        return arr_crop
+    rgb_crop = arr_crop[:, :, :3]
+    gray = cv2.cvtColor(rgb_crop, cv2.COLOR_RGB2GRAY)
+    holes = _find_bubble_interior_holes(gray, frame_darkness, min_bubble_area)
+    if not holes:
+        return arr_crop
+
+    out = arr_crop.copy()
+    h, w = gray.shape
+    for hole in holes:
+        if rng.random() >= prob:
+            continue
+        x, y, cw, ch = hole["bbox"]
+        interior_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.drawContours(interior_mask, [hole["contour"]], -1, 1, thickness=-1)
+        interior_mask = interior_mask.astype(bool)
+        # Never overwrite ink (the hole's own boundary is excluded by construction -- holes
+        # are strictly the non-stroke interior) or already-rendered text glyphs.
+        interior_mask &= gray > BUBBLE_TEXTURE_INK_THRESHOLD
+        if not interior_mask.any():
+            continue
+        texture_fn = _BUBBLE_TEXTURE_FNS[rng.randrange(len(_BUBBLE_TEXTURE_FNS))]
+        texture = texture_fn(h, w, rng)
+        out[:, :, :3][interior_mask] = texture[interior_mask]
+    return out
+
+
+_halo_refiner_cache: dict[tuple[str, str], object] = {}
+
+
+def apply_halo_refine(
+    rgb: np.ndarray,
+    delete_mask: np.ndarray,
+    weights_path: Path,
+    device: torch.device,
+    frame_darkness: int = 40,
+    min_bubble_area: float = 2000,
+) -> np.ndarray:
+    """Halo fix, 5th mechanism (.claude/plans/snazzy-cuddling-creek.md): apply the small,
+    from-scratch, trunk-independent HaloRefinerNet (src/halo_refiner.py) to every detected
+    bubble/cloud contour's crop, pasting the corrected result back into the full mask.
+
+    Bubble detection reuses `_find_bubble_interior_holes` (the same flood-fill-from-corner
+    technique `close_bubble_halo` itself uses on the source RGB, not the predicted mask --
+    same "trusted geometric boundary independent of mask topology" principle). If no contour
+    is found anywhere, this is a no-op, matching `close_bubble_halo`'s own graceful behavior
+    when detection fails.
+
+    Lazily imports halo_refiner (which itself imports from this module) to avoid a circular
+    import at module load time."""
+    from halo_refiner import HaloRefinerNet, CROP
+
+    cache_key = (str(weights_path), str(device))
+    model = _halo_refiner_cache.get(cache_key)
+    if model is None:
+        checkpoint = torch.load(str(weights_path), map_location=device, weights_only=False)
+        config = checkpoint["config"]
+        model = HaloRefinerNet(in_channels=config["in_channels"], base=config["base_channels"]).to(device)
+        model.load_state_dict(checkpoint["state_dict"])
+        model.eval()
+        _halo_refiner_cache[cache_key] = model
+
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    holes = _find_bubble_interior_holes(gray, frame_darkness, min_bubble_area)
+    if not holes:
+        return delete_mask.copy()
+
+    h, w = delete_mask.shape
+    out = delete_mask.copy()
+    for hole in holes:
+        contour = hole["contour"]
+        x, y, cw, ch = cv2.boundingRect(contour)
+        cx, cy = x + cw // 2, y + ch // 2
+        x0 = max(0, min(cx - CROP // 2, max(0, w - CROP)))
+        y0 = max(0, min(cy - CROP // 2, max(0, h - CROP)))
+        x1, y1 = min(w, x0 + CROP), min(h, y0 + CROP)
+
+        arr_crop, mask_crop, _ = crop_with_padding(rgb, out, x0, y0, CROP)
+        rgb_f = arr_crop.astype(np.float32) / 255.0
+        mask_f = mask_crop.astype(np.float32)[None, :, :]
+        model_input = np.concatenate([rgb_f.transpose(2, 0, 1), mask_f], axis=0)
+
+        with torch.no_grad():
+            tensor = torch.from_numpy(model_input).unsqueeze(0).to(device)
+            logits = model(tensor)
+            pred = (torch.sigmoid(logits) > 0.5).squeeze(0).squeeze(0).cpu().numpy()
+
+        # Only paste the VALID (non-padded) portion of the crop back -- crop_with_padding
+        # always returns a full CROP x CROP array, zero/white-padded past the image edge.
+        valid_h, valid_w = y1 - y0, x1 - x0
+        out[y0:y1, x0:x1] = pred[:valid_h, :valid_w].astype(bool)
+
+    return out
 
 
 _cascadepsp_refiner_cache: dict[tuple[str, str], object] = {}
@@ -1950,6 +2192,12 @@ def process_command(args: argparse.Namespace) -> None:
             args.halo_min_bubble_area, args.halo_min_background_area,
         )
 
+    if args.halo_refine:
+        log(f"halo refine (weights={args.halo_refine_weights})")
+        delete_mask = apply_halo_refine(
+            rgb, delete_mask, expand_path(args.halo_refine_weights), device,
+        )
+
     if args.cascadepsp_refine:
         log(f"cascadepsp refine (weights={args.cascadepsp_weights}, fast={args.cascadepsp_fast})")
         delete_mask = apply_cascadepsp_refine(
@@ -2054,6 +2302,11 @@ def process_folder_command(args: argparse.Namespace) -> None:
             delete_mask = close_bubble_halo(
                 rgb, delete_mask, args.halo_ring_width, args.halo_frame_darkness,
                 args.halo_min_bubble_area, args.halo_min_background_area,
+            )
+
+        if args.halo_refine:
+            delete_mask = apply_halo_refine(
+                rgb, delete_mask, expand_path(args.halo_refine_weights), device,
             )
 
         if args.cascadepsp_refine:
@@ -2170,6 +2423,23 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
         help="Minimum connected delete-component area for --close-bubble-halo to treat "
         "it as real background a halo ring can be reclaimed into, as opposed to a small "
         "pocket/speck.",
+    )
+    parser.add_argument(
+        "--halo-refine",
+        action="store_true",
+        help="Refine the delete mask with the small, from-scratch, trunk-independent "
+        "HaloRefinerNet (src/halo_refiner.py) -- the 5th halo mechanism attempted "
+        "(.claude/plans/snazzy-cuddling-creek.md), applied after --close-bubble-halo. "
+        "Opt-in (off by default). Detects bubble/cloud contours the same way "
+        "--close-bubble-halo does (ink-outline flood-fill, independent of the predicted "
+        "mask), crops a small region around each, and runs the refiner -- unlike "
+        "--cascadepsp-refine, this needs no separate venv (a small native torch model in "
+        "the default environment).",
+    )
+    parser.add_argument(
+        "--halo-refine-weights",
+        default=".tmp/halo_refiner_smoke/refiner.pt",
+        help="HaloRefinerNet checkpoint for --halo-refine.",
     )
     parser.add_argument(
         "--cascadepsp-refine",
@@ -2323,6 +2593,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum fraction of the full mask a delete-labeled connected component must "
         "cover to count as 'large' for --background-patch-ratio sampling. Only relevant when "
         "--background-patch-ratio > 0.0.",
+    )
+    p_train.add_argument(
+        "--bubble-texture-prob", type=float, default=0.0,
+        help="Per-hole probability of overwriting a detected bubble/cloud/thorn/spiky "
+        "interior's RGB pixels (never the mask) with a mild synthetic texture (hatching/"
+        "noise/halftone), instead of leaving it flat white. 0.0 (default) is a true no-op. "
+        "Targets the 2026-07-30/31 halo fallback hypothesis (halo_investigation.md): a flat, "
+        "textureless bubble interior may give the model too little local signal to "
+        "distinguish protected bubble interior from nearby background that also happens to "
+        "be near-white. Detection reuses --close-bubble-halo's own flood-fill hole-finding "
+        "logic (reimplemented locally since the generator that draws these bubbles lives in "
+        "the sibling PepperNCarrotDataset repo, which is no longer edited). Data-side only, "
+        "ground truth is never touched.",
     )
     p_train.add_argument(
         "--sdt-loss-weight", type=float, default=0.0,

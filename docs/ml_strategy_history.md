@@ -1473,6 +1473,14 @@ background) closed by Stage 2 bubble training — if so, an SFX-specific Stage m
 at once (see `.tmp/notes/stage3_sfx_hypotheses.md`'s hollow-shape hypothesis, which already
 flags this exact connection and its skin_neck-shortcut risk).
 
+**`ch1_caption_box_in_splash`: CONFIRMED CLOSED (2026-07-31), resolved by Stage 2 bubble
+training, already in production.** Re-verified directly against `regression_suite.py --cases
+ch1_caption_box_in_splash` on the actual production checkpoint (`b2_bubbles_2k_prestage/
+b2_full2k_finetune.pt`): PASS, prob=0.0262 (well under the 0.30 ceiling). A later false alarm
+(the 2026-07-31 30k Stage 1 scale-up's regression check) compared two Stage-1-only checkpoints
+that were never expected to pass this ROI at all — see `synthetic_curriculum_plan.md`'s
+correction in its Part B section. No further action needed on this ROI.
+
 ### RESOLVED (partial, postprocessing) after 3 FAILED training attempts — Stage 2 bubble/cloud halo defect (2026-07-29/30)
 
 **The defect**: on Stage 2 bubble-fine-tuned checkpoints (starting from
@@ -1693,6 +1701,93 @@ all in one day), not a finding of any problem — mirrors the existing "B3: deci
 2 scale-up" open item's own precedent of leaving a scale-up decision as an explicit, separate
 step rather than auto-escalating. Hypothesis 2 (SFX-outline-merges-with-frame-border) remains
 untouched, still an open question per its own framing in `stage3_sfx_hypotheses.md`.
+
+## Halo defect investigation: CLOSED (2026-08-01), 5 mechanisms tried and discarded
+
+Full detail throughout `.tmp/notes/halo_investigation.md`. Summary for future reference: the
+Stage 2 bubble-fine-tune halo defect (undeleted background band, 2-32px, around bubble/cloud
+contours, curvature-correlated) was investigated across **5 independent mechanisms**, spanning
+data-side, loss-side, architecture-side, and (twice) an independent-refiner approach:
+
+1. **Curvature-weighted contour patch sampling** (data-side oversampling) — failed, no
+   measurable effect.
+2. **Boundary-aware loss reweighting**, decoupled from `pos_weight`, tested at 2 radii
+   (loss-side) — helped exactly 1 of 5 real tracked instances (the most ambiguous one), zero
+   effect on the other 4.
+3. **Background-extent-aware patch sampling** (data-side, different oversampling criterion) —
+   zero effect, plus a real regression on an already-fixed Stage 1 defect.
+4. **An auxiliary SDT head** — ruled out by research without implementation: same "concentrate
+   gradient at boundary pixels" mechanism class as 3 *earlier* independently-implemented
+   mechanisms (capacity increase, boundary-weighted BCE, an SDT head, model 18.0's in-trunk
+   `RefineHead`) that all made boundary precision *worse* on this same small `SmallUNet` for a
+   related defect ("clauds") — a converged, repeated signal that concentrating extra gradient
+   pressure at boundaries pushes past this architecture's stability limit rather than through
+   it. A bounded occlusion probe additionally falsified "the model needs more context" as an
+   explanation: delete-probability at the halo location was exactly 0.0000 at every context
+   radius tested (32/64/128/256px, full context) — a context-independent, saturated local
+   prior, not a receptive-field limitation.
+5. **A small, from-scratch, trunk-independent crop-based refiner** (CascadePSP-inspired: keep
+   the one thing that ever meaningfully helped a related defect — an independently-trained
+   corrector, not a trunk modification — while fixing CascadePSP's two disqualifiers,
+   third-party-weight licensing and full-page inference cost). Tried in its two most natural
+   variants:
+   - **Synthetic perturbation-based training** (calibrated outward-ring delete→keep flips,
+     severity/width randomized to match the measured ring-distance profile): the trained
+     refiner reversed its own perturbation function's statistical signature with 95-100%
+     accuracy on held-out same-distribution crops, but showed **zero transfer** to a
+     differently-constructed synthetic test or any of the 5 real tracked instances — it had
+     learned to undo a specific noise texture, not the real defect (confirmed not a bug via
+     direct in-distribution verification).
+   - **Real-error-based training** (the b2 checkpoint's own predicted errors on its own
+     synthetic distribution vs. clean ground truth — verified the halo pattern genuinely
+     appears there first: mean predicted delete-fraction 0.014/0.068/0.368/0.594/0.822 at
+     +2/+4/+8/+16/+32px across 112 real bubble instances, the same qualitative shape as real
+     instances). This removed the "wrong perturbation proxy" confound entirely, and showed
+     healthier training dynamics (gradual loss decrease, no near-zero collapse, a flip-ratio
+     signature opposite to model 18.0's rather than matching it) — **but still zero transfer**
+     to the same synthetic test or any real tracked instance.
+
+   Two data-construction approaches with fundamentally different motivations and failure
+   modes converged on the identical outcome — strong evidence this is a generalization gap
+   intrinsic to the mechanism (a small, from-scratch, crop-scoped network trained only on this
+   project's synthetic bubble renderings), not a fixable data-proxy problem.
+
+   Separately, a cheap prerequisite check (gap-tolerant `--close-bubble-halo` contour closure,
+   widening the stroke-closure kernel up to 35x35) found zero benefit at any tested size, and
+   precisely diagnosed *why* the one remaining real failure case (inst3) can't be fixed
+   geometrically: its ink outline is fully closed, but the tail touches an unrelated
+   panel-divider line, merging two structurally different objects into one connected component
+   — a semantic distinction ("is this connection part of the same object?") no amount of
+   morphological closing can make.
+
+**Verdict: hard wall confirmed across data-side, loss-side, auxiliary-head-side, and
+independent-refiner-side mechanisms (5 total, one with 2 sub-variants) — mirroring this
+project's own "clauds" precedent of stopping after repeated convergent failure across
+genuinely different approaches. `--close-bubble-halo` remains the standing, accepted
+solution** (helps ~1 in 5-6 real instances via hand-coded ink-outline flood-fill geometry, a
+known, bounded, safe fix). No further halo mechanism attempts without genuinely new evidence.
+
+### Reopened and re-verified at full-page scale (2026-08-02) — same verdict, strengthened
+
+The closure above was reached using `real_boundary_probe.py`'s default 600×600 windowed crop
+around each seed point, not full-page (production) scale. Direct re-verification found this
+had already produced one wrong conclusion (inst3's "structurally undetectable" diagnosis was a
+crop-scale artifact — at full-page scale it IS detected and `close_bubble_halo` DOES help it).
+Triggered a full re-verification (`.tmp/notes/halo_investigation.md`, Part A): all 5 instances
+re-measured at full-page scale (3/5 remain genuine zero-halo controls, confirmed), plus 2
+additional independent variables tested on the 5th mechanism that hadn't been isolated before —
+**crop-size** (inference-only 224→512, and a proper 512 retrain — both zero transfer) and
+**training-corpus diversity** (fresh 600-image pool, different seed — zero transfer, even more
+completely than every prior variant: every band, every instance, exactly 0.0000). A geometric
+alternative (Stage 1 + bubble-detector force-keep-interior, bypassing the learned refiner
+entirely) was also tried: moderate but incomplete real-world recall (38-64% across 3
+manually-cleaned reference chapters) plus an unquantified false-positive risk, not adopted.
+**Verdict unchanged, now on stronger footing**: 4 independent variants of the crop-based
+refiner (2 data sources × crop-size × diversity) plus a structurally different geometric
+approach all converge on the same answer. Full detail, all real numbers, in
+`halo_investigation.md`'s "CORRECTION" section. A full CascadePSP-style global+local redesign
+(Part A.6) remains a legitimate untried direction, deliberately not started given the
+overnight time budget — not discarded.
 
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
