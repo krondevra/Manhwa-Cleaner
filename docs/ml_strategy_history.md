@@ -1789,6 +1789,652 @@ approach all converge on the same answer. Full detail, all real numbers, in
 (Part A.6) remains a legitimate untried direction, deliberately not started given the
 overnight time budget — not discarded.
 
+## Instance-aware architecture pivot, Part 0-2 (2026-08-03) — SFX proof-of-mechanism positive (n=6), calibration gap found and resolved on the 3rd attempt
+
+Full detail: `notes/instance_aware_pivot_2026-08-03.md`. Time-boxed session (requested scope:
+full detect-then-segment instance-aware pipeline for frames+bubbles+SFX). Part 0 (code-reading
+only, no training) corrected the premise before executing: the only existing real-image
+object-proposal detector (ink-outline flood-fill, `extract_enclosed_holes`/`close_bubble_halo`)
+only proposes a valid box on **1 of the 5** halo-investigation tracked instances — wherever it
+works, the boundary problem is already solved for free (that's what `close_bubble_halo` does),
+so an instance-aware model only adds value on the 4/5 already-exhausted hard cases. **Scope
+narrowed to SFX specifically**: no existing geometric detector, and `ch1_sfx_text` is a real,
+open, well-diagnosed defect (30.7%→19.9% across the training chain, never closed) with a
+positive, fixable occlusion-probe signature (correct at R<=64px, flips at R>=128px) — unlike
+halo's flat 0.0000-everywhere hard wall. Chose a dense **local**-crop mask (96px margin,
+inside the occlusion probe's "still correct" band) over a full parametric contour, explicitly
+because of the time budget, not a claim contour is worse (this project's history — models
+12.0/13.0/15.0 — shows under-verified training mechanisms produce misleading results, and a
+rushed Deep-Snake implementation couldn't get real verification today).
+
+**Result: positive, real n=6 evidence, not an anecdote.** A tiny (~1/10th SmallUNet width)
+from-scratch local-crop network, trained on 1146 crops extracted from the existing
+`stage3_sfx_2k` pool (new ink-stroke connected-component instance detector,
+`src/research/build_sfx_instance_crops.py` — no `PepperNCarrotDataset` changes), evaluated
+against the tracked `ch1_sfx_text` instance plus 5 additional real SFX-like instances found on
+the manual-reference chapters and visually confirmed one by one: **6/6 PASS** (mean delete-prob
+0.03-0.22 vs. the 0.30 ceiling), every one beating the best whole-page checkpoint on record for
+`ch1_sfx_text` (0.0935 vs. `stage3_sfx_2k_resumed`'s 0.1987). Consistent with the mechanism:
+bounding the crop to 96px structurally prevents the R>=128px trigger from ever being visible.
+
+**A follow-up calibration fix regressed the metric that actually mattered — a real, reproduced
+finding, not noise.** The smoke checkpoint under-predicted delete-confidence on pure blank
+crops (0.20, technically correct side of 0.5 but weak — traced to 46% of glyph-centered
+training crops having zero delete pixels at all). Adding background-only negative crops fixed
+this cleanly (0.99) but **regressed all 6 real instances from PASS to FAIL** (0.43-0.69) —
+reproduced exactly on a second from-scratch run with a clean regenerated dataset. Same
+conservatism/aggression-pendulum shape as this project's larger-scale precedents (black-bg
+dilution attempts, models 12.0/13.0/15.0's boundary-emphasis regressions): naively adding more
+of an underrepresented case overcorrected instead of balancing. **Not adopted** — the
+`glyph_only` checkpoint remains the standing result; both checkpoints kept on disk
+(`.tmp/checkpoints/instance_sfx_smoke/`), not overwritten, so the comparison stays
+reproducible.
+
+**Follow-up: ratio-tuning and post-hoc recalibration both also fail to fix this — closed, not
+just untried.** A lighter background-crop mixture (25% of pages, not 100%) still regressed all
+6 real instances (mean_prob 0.36-0.60, still over the 0.30 ceiling) despite also fixing
+blank-crop calibration (0.91) — ruling out "just use less" as a fix. A cheap post-hoc global
+logit-bias sweep (no retraining, [-6,+6]) found no single value where both blank-crop and all
+6 real instances pass simultaneously — the crossover points for each requirement land at
+almost the same bias, meaning the `with_bg` family didn't just shift, it **lost the
+discriminative margin** between real SFX-glyph content and blank background relative to
+`glyph_only`. This rules out both data-ratio tuning and output recalibration as fixes for this
+sub-problem.
+
+**Third attempt at the calibration sub-problem — SUCCESS.** Same full background-crop data as
+`with_bg`, but background-only crops down-weighted to 0.2x in the loss (`dice_bce`'s new
+`sample_weight` argument, verified an exact no-op when unset — every other variant's behavior
+unaffected) instead of adjusting data quantity or output bias. Result: **6/6 real instances
+PASS** (mean_prob 0.09-0.29, `real_cand_4` closest to the ceiling at 0.289) **and** blank-crop
+calibration fixed (0.586, confidently delete) — the first variant to jointly satisfy both
+properties. Confirms the fix needed to happen in the loss function (letting the model see
+background examples without their gradient dominating as heavily as instance examples), not
+in the data mixture or a post-hoc output shift. Per this project's attempt-discipline
+convention, stopping the calibration side-investigation here because it succeeded, not
+because the budget ran out. `with_bg_weighted` is now the more complete of the two checkpoints
+kept from this session (`glyph_only` remains the cleaner single-variable reference result).
+
+**Explicitly NOT production-ready**: no real (non-heuristic) SFX object-proposal detector, no
+integration logic with the whole-page dense model, no regression-suite battery (network never
+saw skin/steam/bubble content). The calibration caveat that was open at the end of Part 2 is
+now resolved; these three remain the actual blockers to any real use.
+
+## Instance-aware architecture pivot, Part 1 (2026-08-04) — real object-proposal detector + whole-page pipeline
+
+Full detail: `notes/instance_aware_pivot_2026-08-04.md`. Closes the biggest blocker from the
+2026-08-03 session: `with_bg_weighted` had only ever been tested on pre-cut crops with
+hand-specified boxes, never on a whole page where objects must first be found. Built
+`find_sfx_instances()`'s first real precision/recall measurement (a stratified real-page sample,
+not hand-picked candidates): raw SFX-specific precision is low (~20-25%, not cheaply fixable by
+geometric threshold tuning — no clean separator found between SFX/bubbles/captions/noise), but a
+direct dense-baseline comparison showed the false-positive rate poses no functional regression
+risk (every false-positive candidate's bbox is already predicted correctly by the existing dense
+checkpoint, so the correction is a no-op there) — a real, measured mitigation, not an assumption.
+
+Built the whole-page pipeline (`src/research/sfx_instance_pipeline.py`, mirroring
+`apply_halo_refine`'s detect→crop→model→paste-back shape) and ran it end-to-end on real chapters
+(`eval_sfx_pipeline_e2e.py`): **6/6 recall** on the known real instance set via unconstrained
+whole-page detection (not hand-specified boxes). Per-instance comparison against the dense
+baseline was a mixed but still-passing picture (2 improved, 2 slightly regressed, 2 unchanged;
+all 6 still under the 0.30 ceiling) — reported honestly rather than rounded up to a clean win.
+This is the first real instance-aware production *candidate* for SFX specifically, still gated
+on CLI integration and a real regression battery before any deployment consideration.
+
+## Instance-aware architecture pivot, Part 2 (2026-08-04) — class-generalization test on halo: no transfer, confirms the closed investigation rather than reopening it
+
+Full detail: `notes/instance_aware_pivot_2026-08-04.md`. Tested whether the SFX mechanism (local
+crop + 0.2x-weighted background-loss training) generalizes to the original motivating defect,
+bubble/cloud halo — using the existing bubble contour detector (`_find_bubble_interior_holes`,
+already validated, nothing new needed there), the same `TinyInstanceNet` architecture, and the
+exact same `real_boundary_probe.py` ring-distance methodology used for `HaloRefinerNet`'s 4-variant
+evaluation (the halo investigation's already-closed 5th mechanism), for direct comparability.
+
+**Result: no transfer, and two small new regressions on the 5 tracked real instances** — inst1's
++32px band roughly doubled (0.091→0.236), inst6 gained small new non-zero values where baseline
+was clean 0.0, inst3 (the topologically-hard tail-touches-panel-divider case) stayed exactly
+unchanged, inst2/inst5 (zero-halo controls) stayed unaffected. Not an ambiguous or broken result
+(training was clean, output non-degenerate) — a clean, interpretable non-transfer, exactly
+consistent with the halo closure's own occlusion-probe finding (0.0000 sensitivity at every
+context radius, i.e. context-*independent*) vs. SFX's context-*dependent* signature that made
+crop-bounding actually work there. **Confirms, with a mechanistically distinct new architecture
+(fresh local prediction from guidance channels, not `HaloRefinerNet`'s mask-refinement approach),
+that halo's hard-wall is real and general, not an artifact of the specific designs tried before.**
+`--close-bubble-halo` remains the standing solution. Halo investigation's closed status stands,
+reinforced rather than reopened — no further halo-mechanism attempts without genuinely new
+evidence.
+
+## Halo attempt 7 (2026-08-04/05): Deep Snake-style parametric contour deformation — CLOSED (2026-08-04 17:57:24 EEST), targeted fix verified sound but negative on the primary metric
+
+Full detail: `notes/instance_aware_pivot_2026-08-04.md`. A genuinely new mechanism class, not a
+variant of the 6 already-tried ones — every prior mechanism (5 dense whole-page + 1 dense
+instance-scoped crop) still produced a dense per-pixel probability field somewhere in its output;
+this predicts/deforms a sequence of boundary vertices directly (a `TinyInstanceNet`-style CNN
+backbone + circular Conv1d "graph conv" over the closed contour cycle, predicting one radial
+offset per vertex from a coarse initial ellipse), removing the substrate the halo occlusion probe
+showed a context-independent "keep" prior can leak across.
+
+**Two real bugs found, root-caused, and fixed along the way** (not guessed at, each confirmed by
+direct measurement before being called a bug): (1) the synthetic training crop size was
+accidentally truncated to the smaller half of the real bubble-size distribution (caught by a
+visual spot-check, not just trusting an encouraging number — crop size 320→512px fixed it), and
+(2) two training runs died with zero output from a silent OOM (unbatched validation at the larger
+crop size, compounded by fully-buffered stdout hiding all progress) — fixed via batched
+validation + unbuffered logging. Both fixes are durable improvements to this project's evaluation
+infrastructure regardless of this attempt's ultimate verdict.
+
+**Escalating 250→1k→2k real-instance checks against the same 5 tracked halo instances (inst1/2/3/
+5/6) initially looked like a clean, improving trend culminating in a 5/5-improved result at 2k —
+until a visual check (per this project's own standing "spot-check before trusting a number" rule)
+caught a THIRD bug: the ray-walk ground-truth technique (`real_boundary_probe.py`'s per-angle
+ink-darkness walk, previously validated only for dense-model probability measurements) was
+frequently catching interior TEXT ink as a false "boundary," not the true, much larger bubble
+outline — confirmed directly on inst3, where every one of 64 angles returned a 1px "boundary"
+under the original settings (the seed point sits essentially inside a text glyph). Fixed
+(`min_run` 2→5, `max_radius` 220→390, a `MIN_TRUSTED_RADIUS=15` filter) and re-measured all three
+scales.**
+
+**Honest result under the corrected metric: 250=2/5 improved, 1k=4/5 improved, 2k=2/5 improved —
+non-monotonic, not a clean scaling trend**, with deltas mostly small (1-10px) relative to the
+much-larger-than-previously-reported true error scale (26-103px). This pattern reads as
+measurement noise at an underpowered real-instance sample size (n=5), not a reliable signal.
+Regression check (v2_scale1k, the most consistent checkpoint): 8/8 ROIs unchanged, no
+regressions — safe, just not clearly effective. **Verdict: PARTIAL/INCONCLUSIVE — not declared
+working (data doesn't support it) and not declared a clean architectural dead end either (nothing
+here shows the hard 0.0000-at-every-radius wall the original 6 mechanisms hit; synthetic learning
+is genuinely strong and clean throughout).** A legitimate third category alongside "worked" and
+"failed" that this project's own history already makes room for. `--close-bubble-halo` remains
+the standing production solution; this mechanism is not adopted. If revisited, a larger
+real-instance sample (not just more training data at n=5 eval instances) is the most promising
+next lever, ahead of a further architecture change.
+
+### Part A follow-up (2026-08-04 17:07:32 EEST): manual-clean metric promoted to primary, reveals gen-6 combined checkpoint trails production on full-pipeline accuracy
+
+`eval_gen6_checkpoint.py` extended to accept an arbitrary postprocess chain and generalized to a
+pixel-weighted multi-chapter aggregate; this manual-clean comparison (over-del%/under-del%/total
+pixel error against human-cleaned reference chapters) replaces the 5-instance ring-distance check
+as the PRIMARY halo-mechanism metric (ring-distance stays secondary/diagnostic). Chapter 035 was
+attempted but excluded — its reference pair has a genuine 480px height misalignment, a
+newly-discovered data-quality gap, not a metric bug; GT set is 001/002.
+
+Fresh numbers: `10.0-baseline.pt`+islands (production) = 13.0241% aggregate total error;
+gen6-combined (Stage1+2+3) + full chain (islands→repair-frames→close-bubble-halo) = 16.6585%.
+**The gen-6 combined checkpoint + full chain currently measures worse than production on this
+metric**, almost entirely from higher under-deletion (~16.2% vs. production's ~12.4%) rather than
+over-deletion (gen-6 is actually better there: ~0.44% vs. ~0.59%) — i.e. gen-6's base checkpoint is
+more conservative about what to delete, and that costs more accuracy than the halo-closing chain
+recovers. This is a full-pipeline number, not an isolated halo-mechanism measurement: the chain
+operates on top of whatever the base checkpoint already predicted, so future attempt evaluations
+should track a given checkpoint's own raw-vs-chained delta under this metric, not the chain's
+absolute number against a different (weaker) base model.
+
+### Part B follow-up (2026-08-04 17:57:24 EEST): targeted fix verified sound, attempt 7 CLOSED — negative on the primary metric
+
+Added a cosine LR schedule + best-val-loss checkpoint tracking to `contour_deform_net.py`,
+directly targeting the diagnosed cause of attempt 7's non-monotonic real-instance results (flat
+LR, final-epoch-only saving). **The fix works as diagnosed**: at both smoke (250) and 1k scale,
+retrained cleanly with best-epoch == final-epoch (val_loss monotonically improving under the
+schedule, no late-run degradation) — confirms the training procedure itself is no longer the
+suspect.
+
+Verified the resulting `v3_scale1k` checkpoint with both metrics. Ring-distance (secondary):
+4/5 real instances improved, same ratio as before the fix. **Manual-clean (primary), applied via
+`contour_instance_pipeline.py` on top of gen6-combined's full chain: aggregate total error goes
+from 16.6585% (chain alone) to 17.3112% (chain + contour refine) — a clean, both-chapters
+regression**, driven by over-deletion nearly tripling (0.44%→1.24%) while under-deletion barely
+improves (16.22%→16.07%). **This is the exact scenario Part A's metric upgrade was built to
+catch**: a mechanism reading as "4/5 improved" on the isolated boundary-point ring-distance check
+is a net real-world accuracy loss once measured end-to-end against actual manual-clean pages —
+ring-distance doesn't see that the deformation pushes outward into content that should stay kept.
+
+**Verdict: attempt 7 (Deep Snake-style parametric contour deformation) CLOSED, not adopted.**
+Training-procedure issues are ruled out as the explanation (the fix demonstrably worked and made
+it worse, not better); the weak/negative real-instance transfer is a property of the mechanism or
+its training signal itself. `--close-bubble-halo` remains the standing production solution. Per
+plan, proceeds to attempt 8 (Part C).
+
+### New finding (2026-08-04 20:54:35 EEST): SFX under-protection pattern is a SEPARATE defect from bubble-halo, not the same mechanism
+
+Unified-mechanism pre-check (`.claude/plans/snazzy-cuddling-creek.md`), run before committing to
+CRF's 1k-scale verification: does a newly-observed SFX "under-protection" pattern (background left
+undeleted around a real SFX glyph, current production `10.0-baseline.pt`+islands) — distinct from
+the already-tracked, opposite-direction `ch1_sfx_text` OVER-deletion issue (2026-07-29/2026-08-03)
+— share bubble-halo's already-characterized context-independent, saturated occlusion signature?
+
+Two real instances confirmed visually first (both within the already-tracked `ch1_sfx_text`/
+`ch1_blank_bg` ROI area, `data/chapters-initial/001.png` — see
+`.tmp/diagnostics/sfx_underprotection_candidates/final_two_instances.png`): a clear gray
+(kept/undeleted) halo bleeding beyond each glyph's own ink strokes into surrounding blank area that
+`ch1_blank_bg` establishes should be deleted. Ran the SAME occlusion-probe methodology bubble-halo's
+original diagnosis used (`.tmp/diagnostics/halo_context_occlusion_probe.py`'s `occlude_beyond`/
+`measure_ring_bands`, same RADII ladder, same pre-committed >0.05 sensitivity threshold) —
+boundary geometry sourced from each glyph's own ink contour (`cv2.findContours`), not the
+bubble-calibrated ray-walk (`find_per_angle_boundary` still has its old, un-patched
+text-contamination-prone defaults — deliberately not reused here for exactly that reason).
+
+**Result: both instances are clearly CONTEXT-DEPENDENT, not saturated.** `glyph_A_Yu`: sensitivity
+0.0504/0.1304/0.2817 at +8/+16/+32px (all >0.05). `glyph_B_O_stroke`: 0.0350/0.1967/0.2500 (2 of 3
+bands >0.05, max well above threshold). In both cases delete-probability near the glyph rises
+substantially as more context becomes available (32/64px occlusion ≈0, 256px/full context up to
+0.28) — the opposite of bubble-halo's exactly-0.0000-everywhere-regardless-of-context signature
+(`notes/halo_investigation.md`, inst2/inst5, zero sensitivity at every radius).
+
+**Verdict: this is a separate, distinct defect from bubble-halo, not the same underlying
+mechanism.** The unified-mechanism hypothesis is not supported by this evidence — SFX
+under-protection behaves like the *already-known* `ch1_sfx_text` family (context-dependent,
+correct with less context / degrades with more — the same qualitative shape that made the SFX
+instance-scoped model's local-crop-bounding approach work for the over-deletion direction), not
+like halo's context-independent local prior. Does not block or redirect CRF's evaluation, which
+proceeds against bubble-halo only, as already scoped. Worth a separate future look (not today):
+whether the existing SFX instance-scoped architecture (`instance_sfx_net.py`) could also help this
+under-protection direction, given the shared context-dependent signature with the issue it already
+fixes — noted as a lead, not pursued this session.
+
+### Attempt 8 (CRF) follow-up (2026-08-05 05:01:12 EEST): 1k real-instance verification CLOSED — near-zero real engagement, decisively worse than attempt 7's pattern
+
+Verified the 1k CRF checkpoint with both metrics. Ring-distance: `crf_refine` alone byte-identical
+to no-postprocessing baseline on all 5 tracked instances; a direct pixel-diff on the one instance
+with a correctly-detected hole showed CRF touching only 0.027% of the crop, missing the measured
+halo ring entirely. Manual-clean (primary, unaffected by the harness issue below since it runs
+CRF's own full-page hole detection per chapter): 16.6252% vs. 16.6585% baseline, a noise-level
+0.033pp change. **Verdict: CLOSED, not adopted** — more decisively negative than attempt 7 (near-
+total non-engagement with real content, not just weak/inconsistent transfer), confirmed two
+independent ways.
+
+**Real, durable methodology finding, independent of CRF's own fate**: `_find_bubble_interior_holes`
+(shared by `apply_halo_refine`, mechanism 5's original real-instance harness, and the new
+`apply_crf_refine`) found zero holes on 2/5 tracked instances and a hole not containing the seed
+on 2/5 more — only 1/5 correctly targeted. Since mechanism 5 (HaloRefinerNet) used the identical
+detection call in its own original real-instance evaluation, this same gap may have affected that
+closure too — worth remembering if mechanism 5 is ever revisited, though not itself grounds to
+reopen it without new evidence.
+
+Also tested (zero new training) whether the already-proven SFX instance-scoped refiner
+(`with_bg_weighted`, 6/6 real transfer on the *opposite*-direction over-deletion problem) helps
+the new under-protection pattern found earlier tonight: engaged meaningfully more than CRF
+(5.4%/3.8% of crop pixels touched) but didn't visually close the halo, and moved the full-chain
+manual-clean aggregate by less than noise (16.6790% vs. 16.6585%, slightly worse if anything).
+Read as a crop-margin mismatch (that model's ~96px training margin plausibly doesn't reach the
+100px+ halo extent seen tonight) and a metric-sensitivity limit (a narrow, real, localized fix is
+invisible against a whole-chapter aggregate), not as new evidence against that model's own
+already-established real result.
+
+**No overnight training launched tonight** — per this project's own "don't manufacture a fix
+without real evidence for what's wrong" discipline, neither result above points at a specific,
+diagnosable fix worth committing unattended compute to blind. A properly-scoped attempt 9 (or a
+redesigned, wider-margin under-protection-specific SFX training task) is next-session work.
+
+## MISSION: near-manual-clean staged inference pipeline (2026-08-05)
+
+New mission, planned by Fable: geometric/staged inference on the pure Stage 1 checkpoint
+(`18.0-frames.pt`), not further learned halo mechanisms. Full plan:
+`.claude/plans/snazzy-cuddling-creek.md`. Adoption bar: ≤5.0% aggregate manual-clean total error,
+over-del ≤1.5%, both numeric and visual confirmation required.
+
+### Phase 0b (2026-08-05 07:42:20 EEST): chapter 035 GT "misalignment" was never real — fixed, added to the harness
+
+Prior exclusion (coarse top/bottom-shift probe) was wrong. Masked kept-pixel-only comparison at
+shift=0 across all 162,376 valid rows: 99.99% match with near-zero diff (mean 0.23/255) — the
+cleaned reference is a clean prefix (`035.png[:162376]`), not a misalignment; the extra 480 rows
+are a real, correctly-un-cleaned promo/credits page (visually confirmed). Fixed via
+`GT_HEIGHT_OVERRIDE` in `eval_gen6_checkpoint.py`; 035 now in `GT_CHAPTERS`.
+
+Fresh 3-chapter baselines: production 21.25% aggregate, gen6-combined+full 24.03%, **Stage1 pure
+(`18.0-frames`+islands) 20.19%** (still best). 035 alone is far harder than 001/002 (~33%
+total error for every config tested) but the SAME dominant failure mode: 89.5% of its
+under-deletion is near-black backdrop content, confirming Phase 1's priority rather than
+changing it. The mission's real starting point is 20.19%, not the 11.40% 2-chapter figure used
+when the plan was first written.
+
+### Phase 1 (2026-08-05 08:04:58 EEST): geometric black-backdrop reclaim — 3 discriminators tried, none generalizes, stopped for reassessment
+
+`reclaim_black_backdrop` (large near-black full-width components → delete) looked strong in
+total-error terms (Stage1+islands+backdrop aggregate: 20.19%→10.69%) but over-deletion exploded
+1.07%→8.24%, over the ≤1.5% adoption cap. Root cause confirmed visually: real dark ART panels
+(e.g. a stylized game-HUD splash panel with lightning/UI boxes) get misclassified as gutter.
+Three discriminators tested against real per-component GT-precision, not anecdote — per-component
+grayscale std, enclosed-bright-hole fraction, and color chroma — the third looked perfectly
+separated on chapter 001 alone but failed on 002/035 (035 shows continuous, non-bimodal
+GT-precision within single connected components, meaning many real components are genuine
+gutter/content mixtures that no whole-component threshold can correctly split). Full detail:
+`notes/instance_aware_pivot_2026-08-04.md`. Stopped per the plan's own 3-iteration gate rather
+than shipping a chapter-001-overfit rule.
+
+### Phase 1 v2, Gate 1a (2026-08-05 08:26:01 EEST): model has zero per-pixel signal on black content — same saturated-prior signature as bubble-halo
+
+Pre-committed probe (`.tmp/diagnostics/backdrop_prob_probe.py`): does `18.0-frames.pt`'s own
+continuous delete-probability separate true gutter-black from real dark-art-black? Recall stayed
+at 0.0000-0.0021 across the ENTIRE threshold sweep (0.05-0.95) — the model essentially never
+predicts meaningful delete-probability on near-black pixels regardless of threshold. Same
+context-independent saturated "confident keep" pattern documented for bubble-halo's original
+occlusion probe, now confirmed on a second, unrelated defect class. FAIL by a wide margin against
+the pre-committed rule; per plan, no iteration — moved straight to the training-data fallback.
+Confirms the near-black class is 78.7-89.8% of Stage1's total under-deletion across all 3
+chapters, validating it as the dominant lever the mission's numeric target depends on.
+
+### Gate 1c, Attempt 1 (2026-08-05 09:27:43 EEST): black-backdrop training-data fallback shows REAL transfer, with a diagnosed, fixable flaw
+
+Recolored GT-delete-labeled background from white to near-black in 250 of 500 mixed Stage-1
+training pages (`src/research/make_black_backdrop_variant.py`, no sibling-repo edits), resumed a
+5-epoch finetune from `18.0-frames.pt`. Manual-clean 3-chapter result: aggregate 20.19%→14.69%,
+under-deletion down 8.1pp — **real transfer to real chapters, unlike attempts 7/8's near-zero
+result.** Over-deletion also rose 1.07%→3.71%: decomposition traced this to the canonical
+HUD-splash-panel case (the same one that broke Phase 1 v1's geometric approach) — the model now
+correctly protects the tight margin around embedded UI boxes but over-generalizes the surrounding
+panel background to "black → delete" anyway. Root cause: every training example's darkened
+region was GT-delete-labeled; zero contrastive examples of dark-but-real-content taught the model
+no basis to avoid a pure-darkness shortcut. Iterating (Attempt 2/3): add a third variant type that
+darkens (preserving texture, not flat recolor) real GT-keep content, so the model sees both
+directions.
+
+### Gate 1c, Attempt 2 (2026-08-05 12:43:28 EEST): contrastive-variant fix REGRESSED past the original baseline — stopped, not iterating blind
+
+Added a `_darkcontent` variant (darkens GT-keep content, preserves texture) to fix Attempt 1's
+over-generalization. Result: aggregate 25.39% (over 4.14%/under 21.25%) — worse than Attempt 1
+(14.69%) AND worse than the untouched `18.0-frames`+islands baseline (20.19%) on both axes.
+Notably, Attempt 2's own synthetic val_loss (0.190) was BETTER than Attempt 1's (0.270) — no
+correlation with real transfer direction, a third reinforcement of "synthetic metrics gate, never
+prove." Stopped the training-data ladder per the plan's own gate rather than guess at a 3rd
+variant; `blackbg_v1.pt` (14.69%, real transfer confirmed, diagnosed-but-unresolved over-deletion
+flaw) remains the best result this mission has produced, not adopted. Next attempt needs a fresh
+decomposition before any further training design, not another blind variant tweak.
+
+### MISSION PLAN v3, Step 1 (2026-08-05 13:54:52 EEST): confidence-gated fix on v1 — clean FAIL, no attempt budget spent
+
+Tested whether `blackbg_v1.pt`'s own continuous probability (now trained on the black-backdrop
+distinction, unlike `18.0-frames.pt`'s zero signal at Gate 1a) could fix v1's HUD-panel
+over-deletion at inference time alone: geometry gates WHERE (near-black candidate population),
+probability gates WHICH (raise the decision bar only there). Real signal now exists (76.9%
+precision/86.2% recall pooled at tau=0.05, vs. the old model's sub-0.21%-recall everywhere), and
+the canonical HUD-panel case is dramatically fixable in isolation (27.66%→0.28% wrong at
+tau=0.90). **But it doesn't generalize**: real projected outcome at every tested tau shows
+aggregate total 23.88-24.28%, worse than v1-as-is (14.69%) — raising the bar broadly also rejects
+a large share of TRUE gutter pixels sharing the same borderline confidence band, so
+under-deletion explodes (10.98%→20.9-21.5%) far more than over-deletion improves. Decisive,
+cheap, real negative result — no training compute spent. Proceeding to attempt 3: one training
+run, one variable off v1's exact recipe (add a revised, non-label-conflicting `_darkcontent`
+dose).
+
+### MISSION PLAN v3, Attempt 3 (2026-08-05 15:10:52 EEST): PASSES the gate — best mission result, ADOPTED as Phase 1's outcome
+
+One variable off Attempt 1's exact recipe (same 250 orig + 250 `_blackbg`, seed 20260805, +50
+`_darkcontent` pages with a revised floored transform avoiding Attempt 2's label-conflict bug).
+Manual-clean 3-chapter result: aggregate 14.23% (over 3.37%/under 10.86%) — beats Attempt 1's
+14.69% on both axes simultaneously, passes the plan's pre-committed gate. Honest caveat: the
+specific HUD-panel flaw that motivated the attempt is essentially unchanged (28.16% vs. 27.66%
+wrong-deletion in that exact region) — the improvement comes from a general softening elsewhere,
+confirmed via direct visual comparison, not from fixing the targeted case. ROI battery: same
+14/16 pass as Attempt 1, identical failure set, confirmed pre-existing (not newly introduced) via
+a fresh baseline/v1/v3 three-way comparison. `blackbg_v3.pt` ADOPTED as Phase 1's outcome and the
+new working base for Phase 2 (hole-detection hardening), closing the 3-attempt training-data
+ladder with a genuine, if imperfect, net win — full progression: 20.19% baseline → 14.69%
+(Attempt 1) → 25.39% regression (Attempt 2) → **14.23% (Attempt 3, adopted)**.
+
+### MISSION PLAN v4, Step 1 (2026-08-05 15:45:57 EEST): HUD-panel defect is a RELEASE BLOCKER, ~18% of over-deletion, recurring class not an isolated page
+
+Fresh visual review escalated the HUD-panel over-deletion caveat to a named release blocker.
+Measured materiality by decomposing v3+islands' over-deletion on all 3 chapters and visually
+classifying components: confirmed recurring instances beyond the original page (a night
+cityscape, a dark cave scene with an embedded bubble, other dark dramatic scenes) — roughly 18%
+of all over-deletion across the 3 chapters traces to this class, though under-deletion
+(10.86pp) remains the dominant residual. Attempted to wire an automatic ROI check into
+`ch002_rois.json` but found `data/chapters-initial/001.png` does not contain this page at all
+(searched via component scan + naive scaling, neither matched) — the file is not a uniform
+rescale of `.tmp/saved/chapters/001.png` despite matching width. Built
+`.tmp/diagnostics/hud_panel_check.py` as a standalone tracked check instead (verified to
+reproduce the known 28.16% result). Three-item release-blocker list now tracked in
+`notes/next_session_handoff.md` through Phase 4. Proceeding to Phase 2a with Recipe A's effect
+on this blocker as a mandatory Phase 2b line item.
+
+### MISSION PLAN v5, Phase 2a (2026-08-05 16:20:24 EEST): hole-detector "1/5" was crop-window artifact — resolved with zero code changes
+
+Per the plan's Step 0 (re-diagnose at full-page scale before any code change): built
+`.tmp/diagnostics/hole_detector_stage_attribution.py` to attribute exactly which stage
+(enclosure vs. classifier filter) loses each of the 5 tracked real instances. Result: 4/5 PASS
+at full-page scale (the earlier "1/5" came from a 600×600 crop, confirmed as crop-window
+artifact). Only inst2 fails, correctly rejected at the filter stage as genuinely frame-like
+geometry (solidity 0.980, `is_frame=True`) — not an enclosure failure. Zero false holes on
+skin/steam ROIs; 2 accepted holes found within the HUD-panel canonical region (blocker #1),
+plausibly its own UI text boxes — promising but not yet quantified. Phase 2a CLOSED per the
+plan's pre-committed ≥4/5 branch, zero code changes. Proceeding to Phase 2b.
+
+### MISSION PLAN v5, Phase 2b blocker #1 (2026-08-05 16:38:04 EEST): repair_frame_interiors confirmed 0% no-op; offline solidity-mechanism simulation fails cleanly; ESCALATED per the plan's own trigger
+
+`repair_frame_interiors` measured 0% effect on the HUD-panel canonical region across every Recipe
+A chain step — direct trace confirmed it finds the right holes (UI text boxes, areas up to
+179,669px) but they're already correctly kept by the model; the actual wrongly-deleted 28% is the
+dark BACKGROUND itself, a defect shape `repair_frame_interiors` was never designed to address (it
+protects light content enclosed by dark strokes, not dark strokes/fill being wrongly deleted).
+Per the plan, activated the documented candidate (deletion-solidity + kept-adjacency on the
+output mask), prototyped offline (cached masks, no inference) with an 18-combination sweep — FAIL
+across all of them (HUD region flat at 28.13%). Root cause: the HUD panel's main dark component
+has deleted_frac=0.446 (squarely in every tested band) but kept_adjacency=0.124, well below every
+tested threshold — the hypothesized "patchy deletion clustered around kept content" signature
+doesn't hold; the real pattern is diffuse deletion across a large area with sparse kept islands.
+Escalated to Fable per the plan's own pre-declared trigger rather than spending attempt-budget
+guessing at more variants — zero training/attempt budget consumed reaching this conclusion.
+
+### MISSION PLAN v6 (2026-08-05 17:01:42 – 17:09:11 EEST): full-breadth blocker #1 campaign — class metric worse than the single case; D1 validates but doesn't touch the target class; D2 dead
+
+3-attempt ceiling lifted for blocker #1 specifically (user authorization, contingent on
+evidence-justified iterations). Guard step: `.tmp/diagnostics/darkpanel_class_check.py` measures
+wrong-deletion across all 5 confirmed dark-panel-class regions, not just the canonical HUD page —
+result 28.13% (canonical) / 46.30% / 36.65% / 34.29% / 36.51%, **class mean 36.37%**, substantially
+worse than the single canonical case. New pass bar: canonical <5% AND class mean <8% AND
+per-region visual pass.
+
+Probe 0 (`.tmp/diagnostics/component_feature_table.py`): tabulated `deleted_frac`, `gt_precision`,
+kept-island stats, and a new `soft_boundary_frac` feature (outer-ring intermediate-gray fraction,
+testing whether dark art bleeds via soft glow/gradient vs. true gutters meeting hard frame/margin
+edges) for all 100 near-black candidate components across 3 chapters, fit on ch001+002 only,
+validated untouched on ch035 (same protocol that would have caught the earlier chroma
+discriminator's overfit). **D1 (pure `deleted_frac` band-vote)** looked strong in isolation
+(FIT margin 0.530, validates 89%/92% on held-out ch035) but simulating the actual rule
+end-to-end (`.tmp/diagnostics/d1_bandvote_simulate.py`) shows it barely moves the target class
+(canonical 28.13%→27.81%, class mean 36.37%→36.31%) — the class-check regions live inside
+"mixed" components (gt_precision 0.2-0.8, deleted_frac 0.35-0.52) where true gutters and dark-art
+panels are physically fused into one connected near-black blob, not the clean near-zero-deletion
+dark_art population D1 actually discriminates well on. D1 does NOT close blocker #1, but is a
+real, independently-verified ~1.0pp aggregate win (14.23%→13.20% total; over-del +0.37pp,
+under-del -1.40pp) worth carrying forward as a candidate to combine with whatever eventually
+resolves the class. **D2 (`soft_boundary_frac`)** failed outright — FIT margin -0.148, no
+separation. Both dead ends feed D3: the "mixed"-component finding (gutter+dark-art fused by
+connectivity) becomes design input for Family B's `_darkpanel`-coexisting-with-`_blackbg`
+training construction, since a post-hoc component-level vote structurally cannot separate them.
+Proceeding to Probe 1 (context-dependence tile-size sweep) next, per the plan's sequencing.
+
+Probe 1 (`.tmp/diagnostics/probe1_tilesize_sweep.py`, 17:12-17:17 EEST): reran inference on all 5
+class regions at tile_size ∈ {512,768,1024,1536,2048} with generous ±3500px context margins.
+Class-mean swing across sizes = **0.66pp** (36.98%→36.34%→36.38%→36.32%→36.37%), max per-region
+swing 1.28pp — cleanly CONTEXT-INDEPENDENT (plan's threshold: ≤2pp independent, ≥5pp dependent).
+No inference-side lever exists; larger tiles/more context do not help. Confirms the plan's
+featureless-middle hypothesis. Rules out inference knobs entirely — proceeding directly to Family
+B (`_darkpanel` training-data fix), the only remaining mechanism per the plan's structure.
+
+Family B variant built (`make_darkpanel_variant` in `make_black_backdrop_variant.py`, 17:20-17:24
+EEST): authored dark-panel band (near-black, sparse bright UI boxes with dashed text-noise,
+whole-band GT-keep) applied on top of an already-`_blackbg`-transformed page so real gutters and
+the new panel coexist. Pre-training visual check (mandatory since this authors new GT) on 5
+samples: PASS — bands show zero delete-overlay, surrounding real gutters still correctly delete,
+no seam artifacts. Cleared for Rung 1 training.
+
+**Rung 1 RESULT (`blackbg_v4.pt`, trained 17:29-18:23, gated 18:23-18:42 EEST): real regression,
+both axes, ESCALATED.** Class mean 36.37%→**38.04%** (4 of 5 regions worse; canonical
+28.13%→30.87%, dialogue_lightbeam 46.30%→48.98%, night_cityscape 36.65%→42.01%, dark_scene_text
+36.51%→36.90%; only dark_cave_bubble improved, 34.29%→31.43%). Aggregate manual-clean
+14.23%→**16.08%** (over-del 3.37%→8.06%, +4.69pp; under-del 10.86%→8.02%, -2.84pp) — over-deletion
+more than doubling swamps the under-deletion gain. Both blow past the plan's Rung 1 gates. Direction
+is the OPPOSITE of what the construction's rationale predicted (more over-deletion, not less) —
+contradicts a written plan assumption, the plan's own escalation trigger. `blackbg_v4.pt` NOT
+adopted; v3 remains the working base. Escalated to the user/Fable with 3 options (redesigned Rung
+2 separating the dark-keep/dark-delete constructs onto different pages; a smaller dose to check
+dose-linearity; or folding this into honest-exhaustion packaging) rather than Sonnet unilaterally
+redesigning Family B. Full tables: `notes/instance_aware_pivot_2026-08-04.md`, 18:42 EEST section.
+
+### MISSION PLAN v7 (2026-08-05 19:42-19:55 EEST): Phase 0 Bottleneck Content Probe — directional signal for CDR
+
+NotebookLM literature round (critically filtered: SupCon/contrastive rejected per hardware/
+feature-collapse risk; "flat fill" causal claim corrected against our actual noise+gradient
+recipe, but the underlying "missing structural differentiator between authored panel band and
+real gutter band" diagnosis independently verified). Plan v7: Phase 0 (bottleneck probe) → Phase
+1 (Rung 2, frame-line data fix) → Phase 2 (CDR auxiliary reconstruction head, contingent).
+
+Phase 0 (`bottleneck_probe.py`): froze `blackbg_v3.pt`'s encoder, trained a tiny decoder ALONE
+on the bottleneck (synthetic data only, real chapters eval-only per discipline) to reconstruct
+coarse grayscale structure, then evaluated zero-shot on 5 dark-panel-class crops vs 5 real
+control crops. Result: both noisy vs. synthetic sanity (real domain-gap confound, expected), but
+dark-panel MSE (mean 10862) consistently ~50% worse than control MSE (mean 7249) — 4/5 clean
+separation, visually corroborated (controls retain shape echoes, dark-panel rows show near-pure
+noise). Directional signal supporting CDR, not a clean binary — treated as decisive (relative
+comparison, not absolute fidelity, was always the operative test). Phase 2 now evidence-motivated,
+queued behind the cheaper, independent Phase 1.
+
+### Plan v7 Phase 1 RESULT (2026-08-05 20:02-21:02 EEST): Rung 2 (`blackbg_v5.pt`, frame-line) — hypothesis CONTRADICTED, ESCALATED
+
+Added a thin bright border line at the authored panel band's true edges (`frame_line=True`,
+verified at full pixel resolution: uniform value 202 across full width, exactly at the boundary).
+One variable vs Rung 1. Clean training (val_loss 0.287, best/final coincide). Result: class mean
+WORSE (36.37%→38.04%→**39.00%**, 3/5 regions worse than Rung 1 too), aggregate flat vs Rung 1
+(16.08%→**15.94%**, noise-level, still +1.71pp worse than v3's 14.23%). The missing-structural-
+differentiator hypothesis is CONTRADICTED, not confirmed. Per the plan's own pre-declared trigger,
+STOPPED and escalated rather than spending a 3rd run on the separate-pages rung unilaterally.
+`blackbg_v5.pt` NOT adopted; v3 remains the working base. Phase 0's bottleneck-probe signal stands
+independently — Phase 2 (CDR) remains live regardless of Family B's outcome.
+
+### MISSION PLAN v8 (2026-08-06 20:56-21:13 EEST): user-directed classical-CV boundary completion — Phase 0 signal probe PASSES 6/6
+
+Supersedes v7's open questions. User-provided real example (`.tmp/blackbg-border/`, ch035): a
+dark panel border with asymmetric contrast (bright side obvious, dark-smoke side faint-but-real,
+sharp not gradual cutoff) — hypothesis: real panel borders carry PARTIAL signal, not zero
+everywhere. New mechanism class: classical CV boundary tracing + geometric completion, no model,
+no training — sidesteps both Family B failure modes. Fully offline-developable against the
+existing cached v3+islands masks.
+
+Built `.tmp/diagnostics/border_signal_probe.py`: measures local Sobel gradient at each point along
+the true GT panel-boundary contour, against a per-chapter measured noise floor (p99 gradient in
+deep-interior GT-delete regions: 001=4.48, 002=26.91, 035=105.00), plus blind Hough-line
+detectability (no GT) as a derisking check, across 6 instances (the 5 `darkpanel_class_check.py`
+regions + the user's ch035 example, located via template match corr=0.9767).
+
+**Caught and fixed a real methodology bug before trusting the first run**: initial pass showed
+6/6 "generalizing," but overlay images revealed the traced contour ran down the crop's left/right
+edges for full height — an artifact, since these are full-bleed webtoon panels spanning the entire
+720px page width (no left/right gutter exists; only top/bottom transitions are real). Fixed by
+dropping contour points within 3px of the true page canvas edge and segmenting the contour so
+run-length stats don't merge across the removed gap.
+
+**Post-fix result, all 6 instances generalize** (pre-committed bar >=4/6): each shows both real
+strong and real weak stretches (frac_strong 0.27-0.90) with high blind-detectability (0.77-0.92) —
+signal recoverable without GT. Visual review of all 6 overlays confirms no remaining artifacts;
+the user's own ch035 example independently reproduces their hand description almost exactly (weak
+red on the dark-smoke side, strong green on the bright side of the same transition), derived here
+from first principles, not fit to it. Proceeding to Phase 1 (build the completion algorithm) per
+the plan's pre-committed rule.
+
+### Plan v8 Phase 1 (2026-08-06 21:13-21:24 EEST): completion algorithm built and self-tested, but fires ZERO completions on real instances — ESCALATED
+
+Built `src/research/panel_border_completion.py` (Hough segment detection -> collinear grouping ->
+gap-filling -> panel/gutter classification -> bounded reclaim). All 4 required safety self-tests
+pass in isolation (interior-gap-only completion, never extrapolating past outermost anchors).
+Smoke-tested against 2 real tracked instances: zero completions fired, even after relaxing
+clustering/span tolerances — the panel/gutter side-separation safety gate correctly refused to
+act because detected candidate lines sit inside already-correctly-kept art, not adjacent to a
+solid gutter.
+
+Root cause, confirmed by directly rendering the actual wrong-deletion shape (not guessing): the
+real defect is a **large, mostly-contiguous wrongly-deleted blob** (e.g. nearly the entire
+~4900px dark background around the HUD panel), not a thin strip near an under-completed border
+line. Phase 0's GT-guided signal probe correctly found the boundary signal exists; Phase 1's
+blind (no-GT) Hough detection on complex real art isn't reliably recovering the SAME full
+enclosing contour, and even where it partially does, the originally-scoped ACTION (a depth-capped
+local band reclaim) is the wrong shape of fix for a large irregular interior — closer to
+`repair_frame_interiors`'s full-interior flood-fill than a bounded band.
+
+ESCALATED per the plan's own pre-declared trigger rather than unilaterally redesigning toward a
+bigger boundary-loop-closure + flood-fill rewrite. Options presented: (a) full redesign toward
+loop-closure + flood-fill, (b) narrower fusion — use completion only to bridge gaps in
+`repair_frame_interiors`'s own near-black stroke-ring detection (its documented blind spot) rather
+than detecting the whole boundary from scratch, (c) fold into honest exhaustion, fall back to
+Phase 2 (CDR) or accept v3+D1 as the practical stopping point.
+
+### MISSION PLAN v9 (2026-08-06 21:30-21:49 EEST): full mandate — 3 forks decided; per-pixel patchy-deletion reclaim ADOPTED (partial blocker-#1 mitigation); Family B and CDR closed
+
+User granted full decision mandate. Decisions: **(1)** blocker #1 → the handoff's own
+long-documented leading candidate ("deletes patchily around kept content") at PER-PIXEL
+granularity (loop-closure rewrite rejected — blind Hough unreliable on busy art; literal
+ring-gap fusion rejected on a verified mismatch — `repair_frame_interiors` protects LIGHT
+enclosed interiors, and this defect is near-black, part of the stroke map itself).
+**(2)** Family B CLOSED (2/2 regressions, hypothesis contradicted, zero positive evidence).
+**(3)** CDR CLOSED unbuilt (mission pattern 11-for-11: every learned mechanism failed
+synthetic→real; every adopted win is geometric postprocessing).
+
+**Phase A probe** (`patchy_deletion_probe.py`, fit 001+002 / hold out 035): blocker #1 splits
+into two measured sub-classes. TEXTURED dark art separates in (kept-density-200px, max-Sobel-15px)
+space — held-out 035 capture 0.889 at 0.298pp correct-leak (within the 0.3pp under-del budget).
+FLAT dark digital paint (canonical HUD, lightbeam) has local-max Sobel p75=0 — locally
+PIXEL-IDENTICAL to gutter, unfixable by any local rule; this explains the earlier
+context-independence and fused-component findings and is the documented irreducible residual.
+
+**Phases B-C** (`src/research/reclaim_patchy_deletion.py` + end-to-end offline gate, real
+numbers): class mean 36.37%→**20.72%** (dark_cave_bubble 34.29→7.18, dark_scene_text
+36.51→2.05, night_cityscape 36.65→21.71; canonical only 28.13→26.47 — the flat residual);
+aggregate over 3.37→2.92%, under +0.298pp (budget PASS), total 14.2294→**14.0763%**. Visual
+review of 24 rendered changed components: good reclaims are real art recovery; bad reclaims are
+one consistent shape (gradient fade-to-black bands hugging panels, joining the existing
+under-del class), no speckle, no catastrophic keeps. **ADOPTED** as `islands_patchy` chain in
+`eval_gen6_checkpoint.py`. Fresh ch001 inference reproduces the cached simulation exactly
+(11.2096%, 4-decimal match). Blocker #1: PARTIALLY MITIGATED, flat-paint residual formally
+carried as a documented limitation; no further blocker-#1 mechanisms this mission.
+
+### Plan v9 Phases F-H (2026-08-06 21:59-22:12 EEST): RECIPE A adopted at 12.4955% (from 20.19% original baseline); geometric ladder closed on a two-sided-ambiguity finding; one-command `--recipe stage1-v9` wired
+
+**Recipe A** (assembled by one-step-at-a-time offline ablation, then confirmed by fresh
+inference with EXACT 4-decimal reproduction): `islands → reclaim_patchy_deletion →
+d1_region_vote → repair_frame_interiors → close_bubble_halo` on `blackbg_v3.pt`. Aggregate
+over 2.5841% / under 9.9114% / **total 12.4955%** (chapters: 001 8.33%, 002 10.29%, 035
+17.36%); class mean 20.71%, canonical 26.43%. Ablation verdicts: P+D order beats D+P; R adds
+−0.56pp; H neutral (kept, established visual-defect step, zero cost); **SFX instance protect
+EXCLUDED** (+1.50pp regression — its keeps are largely material the manual reference deletes).
+Timing ~3-4 min/chapter full chain (soft target 8min: pass). ROI battery: v3's standing 14/16
+(chain doesn't touch the checkpoint). Wired into `process_command` as `--patchy-reclaim`,
+`--d1-vote`, and the one-command preset `--recipe stage1-v9`.
+
+**Phase G residual decomposition + the closing finding**: residual is under-deletion-dominated;
+ch035's under-del is 76.9% near-black full-width uniform strips — superficially
+`reclaim_black_backdrop`'s exact target. One evidence-justified rung (adding B to the chain):
+under-del −5.10pp but class mean 20.71→74.30%, total 12.50→13.91 — REJECTED, and the reason is
+the mission's closing insight: **B's delete-target and blocker #1's keep-residual are the same
+local pixel class (uniform near-black), split only by page-layout semantics** (035's strips are
+GT-delete backdrop; 001's HUD scene is GT-keep art). The under- and over-deletion residuals are
+two sides of one ambiguity no local/geometric mechanism can split — every further geometric move
+buys one side at symmetric cost to the other. Geometric ladder CLOSED; the ~12.5% floor is the
+measured limit of this checkpoint + local postprocessing under the project's constraints
+(from-scratch, synthetic-only training, local compute). Final mission-wide progression:
+20.19% (18.0-frames+islands) → 14.23% (blackbg_v3+islands) → **12.50% (Recipe A)**; the ≤5.0%
+mission bar remains unmet and is documented as out of reach for this mechanism class — closing
+it would require semantic page-layout understanding (panel-vs-gutter reasoning above the pixel
+level), a different mechanism class than anything tried or available under current constraints.
+
+### MISSION PLAN v10 (2026-08-06 22:26-22:47 EEST): region-level semantics probed — signal exists but is one-sided and already harvested; floor confirmed at region level; nothing adopted
+
+User-directed test of the semantic-floor hypothesis: measure whether REGION/LAYOUT-level
+features separate the near-black ambiguity before building anything.
+`.tmp/diagnostics/region_semantics_probe.py` harvested all candidate components (d1 criteria,
+GT-free) across 3 chapters, GT-labeled ART/BACKDROP/MIXED, 13 features each with the two
+closed discriminators as controls, fit-001+002/holdout-035 split, both classes on both splits.
+Results: (1) **band_density** (±300-row layout context) genuinely separates (non-overlapping
+IQRs both splits) — region-level signal EXISTS, the first new-signal finding since the patchy
+split; (2) **the delete side is locked at region level too** — the canonical HUD and
+night-cityscape components sit inside the BACKDROP feature distribution on every measured
+feature, so the ~5pp under-del prize is indistinguishability-locked at BOTH pixel (v9) and
+region (v10) granularity; (3) the tracked class regions live in MIXED fused components,
+unreachable by component votes. Keep-side-only vote built
+(`src/research/semantic_region_vote.py`, band_density ≥0.75) and simulated end-to-end against
+Recipe A: 21,210 px reclaimed at 100% precision but **−0.0074pp total** — the keep-side mass is
+already harvested by patchy+D1. Sensitivity line at 0.60 reproduces the predicted false-ART
+cliff (+1.01M bad px, total 12.82%). **NOT adopted** (noise-level win fails the cost/benefit
+bar). Durable outcome: the ~12.5% floor now stands at both pixel and region level — the
+strongest closure evidence in the project. Recipe A unchanged at 12.4955%.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
