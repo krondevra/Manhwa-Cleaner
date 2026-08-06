@@ -2435,6 +2435,24 @@ cliff (+1.01M bad px, total 12.82%). **NOT adopted** (noise-level win fails the 
 bar). Durable outcome: the ~12.5% floor now stands at both pixel and region level — the
 strongest closure evidence in the project. Recipe A unchanged at 12.4955%.
 
+### MISSION PLAN v11 (2026-08-06 22:47-22:56 EEST): slab-level (sub-component) smoke test — CLOSED as an honest negative; four-granularity indistinguishability, the floor is final
+
+User-authorized full R&D into sub-component decomposition + scene membership, cheap-first.
+Sliced all candidate components into horizontal slabs at dark-row runs (194 slabs, 3 chapters,
+fit/holdout split), measured gap-height / flanking-content / gray / texture / model-deletion
+per slab against GT labels. Findings: (1) aggregate slab separation exists but is redundant —
+carried by material Recipe A already fixes; (2) the canonical comparison fails: the HUD's big
+flat wrongly-deleted slabs (gap 522-626, gray 0, tex 0.03) are feature-identical to deep
+backdrop slabs on every measured feature; (3) the scene-membership/flanking hypothesis is
+measured dead (flanking content identical for both classes — in a vertical webtoon everything
+is flanked); (4) the tall-gap sliver died on the mass check: a real 1548-row KEEP slab
+violates the safety bar AND the tall-slab prize is only 0.17pp. Attempt B (learned) correctly
+NOT spent — absent input signal, not expressiveness; scaling capacity on a signal problem is
+the closed mistake. **The flat near-black ambiguity is measured indistinguishable at pixel
+(v9), region (v10), component (v10), and slab (v11) granularity. The ~12.5% Recipe A floor is
+final for this project's constraint envelope (from-scratch, MIT-clean, synthetic-only
+training, local compute, no true scene understanding).**
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
