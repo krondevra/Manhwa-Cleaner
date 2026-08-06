@@ -2132,6 +2132,16 @@ def apply_cascadepsp_refine(
 
 
 def process_command(args: argparse.Namespace) -> None:
+    if getattr(args, "recipe", None) == "stage1-v9":
+        # Mission plan v9 Recipe A preset -- see --recipe help text for the evidence trail.
+        args.reclaim_islands = True
+        args.patchy_reclaim = True
+        args.d1_vote = True
+        args.repair_frames = True
+        args.close_bubble_halo = True
+        log("recipe stage1-v9: islands -> patchy-reclaim -> d1-vote -> repair-frames -> "
+            "close-bubble-halo")
+
     device = choose_device(args.device)
     log(f"device: {device}")
 
@@ -2178,6 +2188,18 @@ def process_command(args: argparse.Namespace) -> None:
     if args.reclaim_islands:
         delete_mask = reclaim_landlocked_delete_islands(delete_mask)
 
+    if getattr(args, "patchy_reclaim", False):
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent / "research"))
+        from reclaim_patchy_deletion import reclaim_patchy_deletion
+        delete_mask = reclaim_patchy_deletion(rgb, delete_mask)
+
+    if getattr(args, "d1_vote", False):
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent / "research"))
+        from d1_region_vote import d1_region_vote
+        delete_mask = d1_region_vote(rgb, delete_mask)
+
     if args.protect_borders:
         delete_mask = protect_frame_borders(rgb, delete_mask, args.border_band, args.border_darkness)
 
@@ -2197,6 +2219,15 @@ def process_command(args: argparse.Namespace) -> None:
         delete_mask = apply_halo_refine(
             rgb, delete_mask, expand_path(args.halo_refine_weights), device,
         )
+
+    if args.sfx_instance_refine:
+        log(f"sfx instance refine (weights={args.sfx_instance_weights})")
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parent / "research"))
+        from sfx_instance_pipeline import apply_sfx_instance_refine, load_sfx_instance_model
+        sfx_model = load_sfx_instance_model(expand_path(args.sfx_instance_weights))
+        delete_mask, _sfx_info = apply_sfx_instance_refine(rgb, delete_mask, sfx_model)
+        log(f"sfx instance refine: {len(_sfx_info)} candidate(s) processed")
 
     if args.cascadepsp_refine:
         log(f"cascadepsp refine (weights={args.cascadepsp_weights}, fast={args.cascadepsp_fast})")
@@ -2425,6 +2456,36 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
         "pocket/speck.",
     )
     parser.add_argument(
+        "--patchy-reclaim",
+        action="store_true",
+        help="Reclaim wrongly-deleted TEXTURED near-black art (mission plan v9, blocker #1's "
+        "adopted partial mitigation, 2026-08-06): a deleted pixel that is near-black, locally "
+        "textured (true gutters are flat), and inside a neighborhood with real kept content "
+        "is reverted to keep. Thresholds fitted on manual-clean chapters 001+002 and validated "
+        "on held-out 035 (src/research/reclaim_patchy_deletion.py). Runs after "
+        "--reclaim-islands, before --d1-vote.",
+    )
+    parser.add_argument(
+        "--d1-vote",
+        action="store_true",
+        help="Component-level deleted-fraction band vote on large full-width near-black "
+        "components (src/research/d1_region_vote.py): nearly-kept components get their "
+        "nibbles reverted to keep, solidly-deleted components get completed to delete; the "
+        "mixed middle band is never touched. Validated ~1pp aggregate manual-clean win "
+        "(mission plan v6 Probe 0 / v9 Phase F). Runs after --patchy-reclaim, before "
+        "--repair-frames.",
+    )
+    parser.add_argument(
+        "--recipe",
+        choices=["stage1-v9"],
+        default=None,
+        help="One-command chain preset. 'stage1-v9' = the mission plan v9 Recipe A chain "
+        "(--reclaim-islands --patchy-reclaim --d1-vote --repair-frames --close-bubble-halo), "
+        "assembled by offline ablation on the manual-clean chapters (aggregate total error "
+        "14.23%% -> 12.50%% on blackbg_v3; SFX instance refine measured and excluded, +1.5pp "
+        "regression). Individual step flags may still be added on top.",
+    )
+    parser.add_argument(
         "--halo-refine",
         action="store_true",
         help="Refine the delete mask with the small, from-scratch, trunk-independent "
@@ -2440,6 +2501,27 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
         "--halo-refine-weights",
         default=".tmp/halo_refiner_smoke/refiner.pt",
         help="HaloRefinerNet checkpoint for --halo-refine.",
+    )
+    parser.add_argument(
+        "--sfx-instance-refine",
+        action="store_true",
+        help="Refine the delete mask with TinyInstanceNet (src/research/instance_sfx_net.py), "
+        "the instance-aware architecture pivot's SFX result (notes/instance_aware_pivot_"
+        "2026-08-03.md, -08-04.md). Opt-in (off by default) -- a research/proof-of-mechanism "
+        "checkpoint, NOT regression-tested against the full skin/steam/bubble battery "
+        "production checkpoints get. Detects SFX-like isolated ink clusters via "
+        "find_sfx_instances() (own ink-stroke heuristic, roughly one-in-five raw SFX-specific precision "
+        "on a real stratified sample, but verified safe: every measured false-positive "
+        "candidate's region was already predicted correctly by the dense checkpoint, so "
+        "misdetection is a no-op there, not a regression -- see the notes above for the full "
+        "measurement). Real-instance results are honest, not uniformly positive: of 6 tracked "
+        "real instances, 2 improved, 2 slightly regressed, 2 unchanged vs. the dense baseline "
+        "(all 6 still under the 0.30 ceiling). Applied after --close-bubble-halo/--halo-refine.",
+    )
+    parser.add_argument(
+        "--sfx-instance-weights",
+        default=".tmp/checkpoints/instance_sfx_smoke/instance_sfx_smoke_with_bg_weighted.pt",
+        help="TinyInstanceNet checkpoint for --sfx-instance-refine.",
     )
     parser.add_argument(
         "--cascadepsp-refine",
