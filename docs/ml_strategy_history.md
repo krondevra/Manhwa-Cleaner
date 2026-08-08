@@ -2821,6 +2821,45 @@ adjudications: failing-5 = unchanged-vs-documented (not <=3%), guard = within th
 v21-adjudicated sliver counts (5,806/4,034 on 007/008). All bars PASS on v9-default.
 No ML was trained on any real data; the PSDs served as GT and method documentation only.
 
+### PLAN v23 (2026-08-08 18:47-19:20 EEST): spiky-cloud SCOPE solved — two-signal cascade at precision 1.0 (13/13 TP, 0/105 FP incl. holdout); ships OPT-IN as v10 steps='S' (fit-page bar blocked default-on via a documented GT-era conflict)
+
+**Reference labeling (evidence-verified).** Gap-sealed-enclosure candidates (v21
+proposal) on chapters 001/002: 102 candidates. Initial action-benefit/harm labels gave 0
+TPs — diagnosed (render) as two artifacts: the harm at genuine clouds is (a) the bbox
+margin's panel-edge band and (b) etalon-kept soup; relabeling on the benefit signature
+(TP >= 10k px, FP < 2k, 4 mid-range excluded) lands EXACTLY on the brief's ground truth:
+13 TPs = 3 on 001 + 10 on 002, with an empty benefit gap 7.8k-12.5k.
+
+**Per-signal separability (all three reported, as mandated):**
+  A radial run count (elliptical rim annulus 1.02-1.30, 360 bins): TP 60-103 runs vs FP
+    max 42 — STRONG, the discriminating signal (empty gap [43,59] -> threshold 50).
+    Its sub-statistics cv_gap and rim fraction: no separation.
+  B spectral periodicity (FFT peak ratio): NO separation (TP 0.02-0.05 vs FP 0.01-0.09)
+    — honest negative; the rim is dense irregular alternation, not periodic.
+  C interior glyph count: partial (TP p10 8.6 vs FP p50 6) — used as second wall only.
+**Cascade A(runs>=50) AND C(glyphs>=5): 13/13 TP, 0/85 FP, 0 FN.** Holdout (019 slab,
+21 enclosures incl. v21's forest/face FPs, never seen by the cascade): first run MISSED
+the known cloud — C counted 0 glyphs because the 019 cloud's text is dark-gray, not
+near-black; one-variable fix C@ink<100 (reference confusion unchanged: 13/13, 0/85) ->
+holdout PASS: exactly 1 site accepted (the real cloud), all 20 FPs rejected, and the
+auto path reproduces v21's manual-bbox action numbers to within 4 px (2,392/304 vs
+2,396/304). Guard: 007/008 full pages -> 5 accepted sites, every one rendered and
+verified a genuine spiky cloud, deletions confined to between-ray soup.
+
+**Fit-page finding (real, fixed, and the honest ship limiter).** The 005-1 battery bar
+FAILED (+0.45pp): renders showed the action's bbox margin blanks a ~60px strip of
+UNPROTECTED panel art below/above a cloud (the same band the 019-2 etalon hid inside its
+manually-restored frame zone). Fix: `clean_spiky_region_clipped` (v10) — deletion limited
+to the flood from bbox center that cannot cross a >=100px horizontal dark run. The panel
+band is eliminated (renders); the remaining fit delta (+0.36pp) is ENTIRELY between-ray
+soup that 005-1's 3-generations-old GT kept but the current recipe (verified by the
+dedicated 019-2 etalon, 100.00% tol-200 consistency) deletes — a GT-era conflict on the
+defect class itself, not content loss. Per discipline, no bar restatement on disputed GT:
+**S ships OPT-IN** (v10 default == v9 exactly; steps='S', combinable with 'D'). If the
+005-1 fit GT is ever refreshed with the current recipe, default-on can be revisited
+honestly. Battery with S on: synthetic PASS, gold PASS (net improvement, three parts
+better), fit blocked as above.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset

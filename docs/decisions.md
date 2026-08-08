@@ -374,3 +374,15 @@ mechanism attempt is logged here with its measured result:
   Battery expanded to 10 gold parts with restated bars (failing-5 unchanged-vs-documented;
   guard within v21-adjudicated sliver counts) — PASS. PSDs used for GT/method extraction
   only, no training on real data.
+- **v23 spiky-cloud SCOPE round: SOLVED — two-signal cascade (radial run count >= 50 on
+  the elliptical rim + interior glyphs >= 5 at ink<100) hits precision 1.0 everywhere
+  measured: 13/13 TP + 0/85 FP on 001/002, 1/1 cloud + 0/20 FP on the unseen 019 slab,
+  5/5 verified-genuine sites on 007/008; spectral periodicity reported as a no-signal
+  honest negative** (2026-08-08). Auto path reproduces the v21 manual-bbox action to
+  within 4 px. New real finding: the action's bbox margin blanked a ~60px strip of
+  unprotected panel art (the true identity of the 019-2 "below-frame" over-deletion);
+  fixed by panel-line flood clipping (`clean_spiky_region_clipped`). Ships OPT-IN as v10
+  `steps='S'` (default == v9): the residual fit-page delta (+0.36pp) is between-ray soup
+  kept by 005-1's pre-recipe GT but deleted by the current verified recipe — a GT-era
+  conflict, not content loss; default-on deferred until that GT is refreshed rather than
+  restating a bar against disputed ground truth.
