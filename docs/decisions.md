@@ -199,11 +199,19 @@ mechanism attempt is logged here with its measured result:
   Split-off pure-white panel interiors get seeded WHOLESALE -> over-del guard violated
   (fit page over 0.18%->2.18%; 001-3 +0.51pp).
 - **v14 seed attempt 1b — barrier-split + gray>=250-GATED seeding + frac250 relaxed to 0.90:
-  ADOPTED as v4** (2026-08-07). Gold-part white-track error median 8.77%->3.22%, worst
-  16.85%->8.35%, over-del DOWN on every gold part, leakage stays zero. Flagged cost: the
-  fit page's judgment-class document panel is re-exposed (+1.96pp over there; page total
-  2.65%, still within its 3.0% bar) — bright-white-content panels with broken frame rings
-  remain the track's top judgment-class defect, matching the original v1-v2 flood-fill
+  ADOPTED as v4** (2026-08-07; the 2x2 factorial was COMPLETED 2026-08-08 per the
+  one-variable rule — 1b changed two coupled knobs, so the two missing quadrants were run on
+  the same harness/pages). Gold-part white-track error median 8.77%->3.22%, worst
+  16.85%->8.35%, over-del DOWN on every gold part, leakage stays zero. **Factorial
+  attribution (measured)**: (gated, 0.981) = gating ALONE cuts over-del (001-3 2.08->0.64%,
+  fit 2.18->1.99%) with ZERO recall change (001-2 under-white 11.65% vs 1a's 11.63%);
+  (wholesale, 0.90) = relaxation ALONE delivers nearly all of 1b's recall (001-2 6.59%,
+  002-1 1.03%, 033-1 0.70%) at +1-2pp over-del per part — NOT catastrophic as predicted
+  (prediction was overcautious; recorded). So: relaxation carries the recall gains, gating
+  carries the over-del safety; 1b composes both, and remains the best quadrant. Flagged
+  cost: the fit page's judgment-class document panel is re-exposed (+1.96pp over there; page
+  total 2.65%, still within its 3.0% bar) — bright-white-content panels with broken frame
+  rings remain the track's top judgment-class defect, matching the original v1-v2 flood-fill
   lesson above (structure, not color, decides).
 - **v14 seed attempt 1c — stronger split barrier Canny(30,90): NO-OP** (2026-08-07).
   Byte-identical results to 1b; the 60/120 edges already split everything splittable.

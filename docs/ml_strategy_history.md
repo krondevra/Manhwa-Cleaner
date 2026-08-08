@@ -2529,7 +2529,13 @@ guard; **1b ADOPTED as `replicate_pipeline_v4.py`** — barrier-split of the har
 gray>=250-GATED seeding + frac250 relaxed to 0.90: gold white-track median 8.77%->3.22%
 in-experiment, over-del DOWN on every gold part, leakage stays 0. Flagged cost: the fit page's
 judgment-class document panel re-exposed (+1.96pp over there; page 2.65%, within its 3.0%
-bar). 1c (Canny 30/90) byte-identical no-op.
+bar). 1c (Canny 30/90) byte-identical no-op. **2x2 factorial completed 2026-08-08 (the
+one-variable rule — 1b changed two coupled knobs)**: (gated, 0.981) = gating alone cuts
+over-del (001-3 2.08->0.64%, fit 2.18->1.99%) with zero recall change; (wholesale, 0.90) =
+relaxation alone delivers nearly all the recall (001-2 under-white 6.59%, 033-1 0.70%) at
++1-2pp over-del per part — measured NOT catastrophic, correcting an overcautious prediction.
+Attribution: relaxation carries recall, gating carries safety; 1b composes both and remains
+the best quadrant.
 
 **Phase A (breadth: 20 synthetic GT pages via the P&C stage1 generator + full rerun)** —
 pre-stated bars ALL FAIL, with three cleanly separated causes: (i) gold median 4.08% vs
