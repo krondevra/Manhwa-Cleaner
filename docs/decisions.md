@@ -259,3 +259,27 @@ mechanism attempt is logged here with its measured result:
   regardless of which variable is isolated. Battery with hook ON: fixed 2/5 target pages,
   collapsed 7 previously-passing synthetic pages to 15-33% under-deletion. Class stays OPEN;
   checkpoints kept in .tmp for future experiments (richer context is the untested axis).
+- **v16 Cluster 1 — two-band calibration: ADOPTED (both bands measured, separate as
+  predicted)** (2026-08-07). (a) JPEG border residue measured at [240,250) (76.6% of
+  border-adjacent undeleted px >= 240) -> border sweep, 3px radius, 3 iterations. (b)
+  under-frame gray line measured at 210-220 (2,693/3,910 px in the 333-region histogram) ->
+  [200,230] band deleted only directly below near-black strokes AND near deleted background.
+  No shared-knob tension in practice: different bands, different triggers.
+- **v16 Cluster 2 — variable-position edge line: MECHANISM REUSED from Cluster 3** (2026-08-07).
+  Found at col 688 (1-3px from right edge, 58-62k rows, both chapters) + smaller left-edge
+  runs on 007 (position varies, as the user said). One thin-line exemption in the local
+  reclaim (width <= 4px bypasses the pocket-area cap when edge-touching): residual 3,181 ->
+  68 px on the test strip. No parallel implementation built.
+- **v16 Cluster 3 — local background reclaim: attempts 1+2 ADOPTED, attempt 3 REJECTED**
+  (2026-08-07). Core: bright pockets (>=240) with ring >= 85% ink+deleted(+page-edge), pocket
+  area < 10,000 (repair_frame_interiors' own interior convention = the 3(d) size guard),
+  closed-frame interiors excluded. Attempt-2 fix after the first adversarial test leaked
+  1,941 px of text counters: OUTER-ring guard (context beyond the enclosing ink must be
+  >= 35% deleted — an SFX glyph floats on deleted field; letter counters in kept text do
+  not). Corrected adversarial test (counters inside correctly-KEPT bubbles, two regions):
+  0 suspicious px both ways, SFX pockets reclaim 4.5k px. (The original doc-panel negative
+  was a test-design artifact: v5 already wrongly deletes that panel, so step C merely joined
+  a pre-existing judgment-class deletion.) Attempt 3 (2px ink dilation in ring composition,
+  targeting the 666-class note-text pockets): REJECTED — bought -3% residual there while
+  leaking 9,365 px into kept bubble-text counters. 666-class large fragmented pockets remain
+  a documented residual.

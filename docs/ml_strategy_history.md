@@ -2595,6 +2595,48 @@ the fair white-track metric for the first time.** Open classes after v15: white-
 ambiguity (5 synthetic pages at 15-20%, Track 1's class, stays open) and the judgment-class
 document panel (fit page).
 
+### PLAN v16 (2026-08-07 17:30-17:53 EEST): seven user-found defect classes -> v6; regression battery PASS; Cluster 2 reuses Cluster 3's mechanism; two documented residuals
+
+User's manual diagnostic pass produced 6 example crops (`.tmp/errors-examples/111-666.png`),
+all template-located in ch007/008 (corr 0.978-1.000). Cluster grouping verified with one
+correction: the claimed "cluster 1 vs 2" example split was as-suspected, and Cluster 3's four
+findings are indeed one mechanism (local pockets) in different geometric contexts — EXCEPT the
+666-class (see residuals).
+
+**Measured bands (before any fix, per the discipline)**: JPEG border residue [240,250)
+(76.6% of border-adjacent undeleted px ≥240 — user's hypothesis confirmed); under-frame line
+210-220 (2,693/3,910 px in the 333-region histogram) — two SEPARATE bands, two separate
+mechanisms, no shared-knob tension in practice.
+
+**v6 = v5 + three post-steps** (`replicate_pipeline_v6.py`, v5 untouched):
+A. border-residue sweep ([240,250) within 3px of deletion, 3 iterations);
+B. under-frame line ([200,230] directly below near-black strokes, near deleted bg);
+C. LOCAL BACKGROUND RECLAIM — the v15 gated-seed idea generalized to pockets: bright (≥240)
+   pockets, ring ≥85% ink+deleted(+page-edge), area <10k (repair_frame_interiors' interior
+   convention as the 3(d) size guard), closed-frame interiors excluded, plus the attempt-2
+   OUTER-ring guard (context beyond the enclosing ink ≥35% deleted — separates floating SFX
+   glyphs from letter counters in kept text; the corrected adversarial test shows 0 suspicious
+   px in kept bubbles both regions, 4.5k px of SFX pockets correctly reclaimed). Cluster 2's
+   variable-position edge line (found: col 688, 58-62k rows, both chapters; left-edge runs on
+   007) is handled by the SAME step via a thin-line exemption (width ≤4px bypasses the area
+   cap when edge-touching): residual 3,181→68 px on the test strip. No parallel code built.
+
+**Regression battery (pre-stated guards) PASS**: gold deltas −0.20 to +0.11pp (four parts
+improved), fit page −0.15pp (3.10%), all 15 passing synthetic pages stay ≤3%. Shipping file
+verified to reproduce battery numbers exactly.
+
+**Rejected on measurement**: cluster-3 attempt 3 (2px ink dilation in ring composition) —
+−3% residual on the 666-class for 9.4k px of leak into kept text counters.
+
+**Documented residuals**: (1) the 666-class — large barrier-fragmented pockets around
+free-floating note text (region improves only 64.2k→62.2k bright-undeleted px; safe local
+rules can't reach it); (2) the white-panel-interior ambiguity + doc panel (unchanged, deferred
+BandNet class). **BandNet-orthogonality statement (required deliverable): this round is fully
+ORTHOGONAL to the deferred gutter-vs-white-interior class** — every v16 mechanism operates on
+small local pockets/bands with unambiguous GT; none touches the full-width white-band label
+ambiguity, and the 5 failing synthetic pages' numbers are byte-identical before/after v6.
+Resuming BandNet later inherits v6 unchanged.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
