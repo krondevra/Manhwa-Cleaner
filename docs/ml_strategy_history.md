@@ -2580,9 +2580,12 @@ same data/seeds)**: attempt 1 (250 pages, plain BCE) froze at the 9:1 prior. Iso
 Isolated 2b (data only: 1k pages, plain BCE) escapes the prior SLOWLY without balancing,
 reaching balanced 0.849 by epoch 15 — data alone was nearly sufficient; balancing bought
 speed at the cost of stability (attribution corrected from the original "imbalance + data
-starvation" framing). Attempt 3 (lr 3e-4 + decay + best-checkpoint; the lr+decay being the
-single diagnosed remedy for 2a's oscillation, best-checkpoint being measurement bookkeeping)
-trained STABLY to val balanced-acc 0.874 (interior 0.957 / gutter 0.792). **Honest negative
+starvation" framing). Attempt 3 (lr 3e-4 + decay + best-checkpoint; best-checkpoint being measurement
+bookkeeping) trained STABLY to val balanced-acc 0.874 (interior 0.957 / gutter 0.792); its
+lr/scheduler bundle was ISOLATED 2026-08-08 — lr 3e-4 alone is stable to balanced 0.870 (the
+lr reduction carries the stability), while 1e-3+StepLR alone still crashes early (epoch 7
+balanced 0.545) and settles only once the decay reaches the low lr: the scheduler is
+redundant polish. **Honest negative
 at integration — verified on every variant**: the hook needs gutter-recall >= 0.995
 (protecting one misclassified gutter band costs its whole area), and the operating-point
 sweep collapses there on ALL trained variants (attempt 3: interior 0.00-0.11; 2a:

@@ -255,16 +255,21 @@ mechanism attempt is logged here with its measured result:
   speed at the cost of stability** (this corrects the original entry's "imbalance + data
   starvation" framing).
   Attempt 3 (lr 3e-4 + StepLR decay + best-checkpoint selection, 1k + pos_weight): STABLE,
-  val balanced-acc 0.874 (interior 0.957 / gutter 0.792). Bundling judgment, stated rather
-  than excused: best-checkpoint selection is measurement bookkeeping (which artifact is
-  kept), not a training variable; lr+decay is the single diagnosed remedy for 2a's measured
-  oscillation.
-  VERDICT (unchanged, now verified on every variant): the integration's cost structure is
-  asymmetric — protecting one misclassified gutter band costs its whole area — requiring
-  gutter-recall >= 0.995, and the operating-point sweep shows interior-recall collapsing
-  there on ALL trained variants: attempt 3 best 0.00-0.11; isolated 2a 0.000-0.125 at
-  gutter-recall 1.0; isolated 2b 0.109 at 1.0 (0.283 at 0.991). NO viable operating point,
-  regardless of which variable is isolated. Battery with hook ON: fixed 2/5 target pages,
+  val balanced-acc 0.874 (interior 0.957 / gutter 0.792). The lr/scheduler bundle was
+  ISOLATED 2026-08-08 (same data/seeds): **3-lr (lr 3e-4 alone, no scheduler) is stable and
+  reaches balanced 0.870 — the lr reduction alone delivers the stability; 3-sched (lr 1e-3 +
+  StepLR alone) still crashes early (epoch 7: balanced 0.545, interior 0.109) and only
+  settles once the decay has effectively reached the low lr — the scheduler is redundant
+  polish.** Best-checkpoint selection needs no isolation run: it is measurement bookkeeping
+  (which artifact is kept), and every log records per-epoch metrics from which best and last
+  are both readable.
+  VERDICT (unchanged, now verified on every variant incl. the lr/scheduler isolations): the
+  integration's cost structure is asymmetric — protecting one misclassified gutter band
+  costs its whole area — requiring gutter-recall >= 0.995, and the operating-point sweep
+  shows interior-recall collapsing there on ALL trained variants: attempt 3 best 0.00-0.11;
+  isolated 2a 0.000-0.125 at gutter-recall 1.0; isolated 2b 0.109 at 1.0 (0.283 at 0.991);
+  3-lr and 3-sched checkpoints swept with the same collapse shape. NO viable operating
+  point, regardless of which variable is isolated. Battery with hook ON: fixed 2/5 target pages,
   collapsed 7 previously-passing synthetic pages to 15-33% under-deletion. Class stays OPEN;
   checkpoints kept in .tmp for future experiments (richer context is the untested axis).
 - **v16 Cluster 1 — two-band calibration: ADOPTED (both bands measured, separate as
