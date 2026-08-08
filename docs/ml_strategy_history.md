@@ -2781,6 +2781,46 @@ documented residuals, not A' effects); adversarial guard flags on 007/008 (5,806
 visually verified as the sliver class (80% thin, max component 116 px). SHIPPED as v8
 default; `clean_page(steps='')` reproduces v7 exactly.
 
+### PLAN v22 (2026-08-08 16:14-16:45 EEST): new-gold PSD method extraction — the black-track decoded; dark backdrop = the entire remaining gap; a3 flatness rule ships OPT-IN (v9, steps='D'), full-auto honest negative
+
+**Part 1 — method extraction (new-gold PSDs, 10 parts, 26 layers).** The `mask-hard`/
+`mask-soft` layers present in every PSD are BLACK-track candidate masks, not white-track:
+bright-stratum recall vs final GT ~0-2% everywhere, dark-stratum recall 67-100%. Decoded
+parameters: mask-hard ~ (gray <= 32) dilate r=4 (IoU 89.6% on 033-3), mask-soft ~
+(gray <= 64) dilate r=4 (IoU 92.7%); 033-3's `black hard`/`black soft` refinements reach
+prec 88/86% vs final GT. Crucially, the user applied these candidates SELECTIVELY:
+near-wholesale on backdrop parts (033-2 dark recall 100%), rejected on dark-art parts
+(001-2 precision 1%) — the scope decision was always human.
+
+**Part 2 — 10-part v8 baseline (033-2/3/4 first-ever numbers).** White-track excellent
+everywhere (0.0237-6.7978%); the dark stratum is the entire remaining gap: under-dark
+24.8% (001-1), 11.9/5.7% (002-1/2), 12.1% (033-1), 38.5/35.1/41.7% (033-2/3/4) of page.
+**Classical scope ladder (3 attempts, fit 001-1+033-3, holdout the rest):** a1
+margin/deleted-bg connectivity — backdrop recall ~complete but dark ART eaten (001-2
+over +14.0pp, zero benefit); a2 + wraps-panels protected-adjacency — fails (bubbles float
+in dark art too; backdrop and art fuse into single components: 033-3 over 18.4pp on FIT);
+a3 + flatness gate (std over 21x21 <= 2.0) — breakthrough on backdrop parts: full-error
+001-1 28.6->7.3%, 033-3 36.6->6.8%, 002-1 14.2->4.9%, 002-2 8.1->5.2%, 033-1 18.9->9.9%,
+033-2 38.5->4.7%, 033-4 44.0->11.9%; but dark-art parts REGRESS (001-2 +6.0pp, 001-3
++1.4pp, 002-3 +0.4pp) and the residual over-del on backdrop parts (renders) is in-scene
+flat-black art fill (caption-box scene fields, blacks around figures) — locally identical
+to page backdrop, distinguishable only compositionally. The semantic floor at the dark
+stratum, consistent with the gen-6 blocker-#1 record.
+
+**Verdict: full-auto dark track = honest negative; a3 ships OPT-IN.**
+`replicate_pipeline_v9.py`: default == v8 byte-identical (verified; battery deltas all
++0.0000pp); `steps='D'` = `step_h_dark_backdrop` (flat dark connected to margins/deleted
+bg, protected interiors excluded) for parts a human marks as backdrop-bearing — the
+`--reclaim-islands` opt-in precedent; one click replaces the manual black-track pass at
+~95% recall. Region-scoped GUI use available via the same machinery as v21's
+`clean_spiky_region`.
+
+**Part 3 — battery expanded to all 10 gold parts** (`v22_battery.py`; 033-2/3/4 added
+with 2026-08-08 v8 references 0.0237/1.5246/2.3373). Bars restated to encode the standing
+adjudications: failing-5 = unchanged-vs-documented (not <=3%), guard = within the
+v21-adjudicated sliver counts (5,806/4,034 on 007/008). All bars PASS on v9-default.
+No ML was trained on any real data; the PSDs served as GT and method documentation only.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset

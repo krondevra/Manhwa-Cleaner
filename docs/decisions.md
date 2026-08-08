@@ -361,3 +361,16 @@ mechanism attempt is logged here with its measured result:
   over-del is 90% <=4px frame-hugging slivers (1 px GT-AA); battery: all gold parts
   improve, fit improves, failing-5 untouched, guard flags visually verified. v8 default =
   v7 + A'3; steps='' = v7-exact; spiky auto variants retained as documented negatives.
+- **v22 new-gold PSD round: black-track method DECODED (mask-hard/soft = dark-side
+  candidate masks, T=32/64 + dilate-4, IoU 89.6/92.7%); dark backdrop measured as the
+  entire remaining gap (under-dark 25-44% of page on 7/10 parts, 033-2/3/4 measured for
+  the first time); full-auto scope = honest negative after a 3-attempt ladder; flatness
+  rule (dark<=64 & std21<=2.0 & margin/deleted-connected & ~protected) SHIPS OPT-IN as v9
+  `steps='D'`** (2026-08-08). Opt-in gains on backdrop parts: 28.6->7.3, 36.6->6.8,
+  38.5->4.7, 44.0->11.9% full-error; dark-art parts would regress (001-2 +6.0pp) — the
+  human keeps the per-part decision, exactly as the PSD evidence shows the user always
+  did (their own candidates: 033-2 applied at 100% dark recall, 001-2 rejected at 1%
+  precision). v9 default == v8 byte-identical (battery deltas +0.0000pp, all 10 parts).
+  Battery expanded to 10 gold parts with restated bars (failing-5 unchanged-vs-documented;
+  guard within v21-adjudicated sliver counts) — PASS. PSDs used for GT/method extraction
+  only, no training on real data.
