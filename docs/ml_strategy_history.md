@@ -2519,6 +2519,38 @@ term until v3 added exactly that (a Canny barrier) — converging on the same de
 from the opposite direction. The v3 post-filter has no SmallUNet analogue (topology-level
 reasoning; nearest relative is reclaim_landlocked_delete_islands' inverse).
 
+### PLAN v14 (2026-08-07 12:40-12:52 EEST): seed-merge fix ADOPTED as v4 (gold white-track error halved); synthetic breadth test surfaced the white-panel-interior ambiguity — one classical probe failed decisively; micro-net fallback flagged for explicit go-ahead
+
+**Phase B (seed-merge fix)**: root cause confirmed on 001-2 (Canny barrier splits gradient-
+rimmed content off cleanly, but soft gradient-free steam keeps merged components at frac250
+0.50-0.94, below the 0.981 bar). Variants measured end-to-end (7 gold parts + fit page):
+1a (split only) REJECTED — wholesale seeding of split-off panel whites violates the over-del
+guard; **1b ADOPTED as `replicate_pipeline_v4.py`** — barrier-split of the hard mask +
+gray>=250-GATED seeding + frac250 relaxed to 0.90: gold white-track median 8.77%->3.22%
+in-experiment, over-del DOWN on every gold part, leakage stays 0. Flagged cost: the fit page's
+judgment-class document panel re-exposed (+1.96pp over there; page 2.65%, within its 3.0%
+bar). 1c (Canny 30/90) byte-identical no-op.
+
+**Phase A (breadth: 20 synthetic GT pages via the P&C stage1 generator + full rerun)** —
+pre-stated bars ALL FAIL, with three cleanly separated causes: (i) gold median 4.08% vs
+bar 4.0, max 10.06% (001-1's white-pockets-in-dark-layouts — distinct cause, unchanged by the
+seed fix); (ii) fit page 3.03% vs bar 3.0 (the doc-panel cost); (iii) **5 of 20 synthetic
+pages over-delete 15-20%: full-bleed panels with pure-white interiors — locally IDENTICAL to
+gutters (white band between two full-width bars), the project's original v1-v2 flood-fill
+lesson in classical form. NOT a v4 regression: v3 fails the same pages WORSE (17-44%).**
+15/20 synthetic pages: 0.02-0.5% (near-perfect).
+
+**New-class classical probe (band-height rhythm): decisive negative** — tall-outlier band
+exclusion (K x median, swept 1.5/2/3) fixed none of the synthetic outliers AND broke real
+pages by +31-39pp under-deletion (real gutters vs text-gap-dominated medians). The
+cross-distribution fragility demonstrates layout-statistics heuristics won't hold this class.
+
+**Round verdict**: v4 strictly dominates v3 on every measured page and ships; the pre-stated
+generalization bars remain unmet with the residual now attributed to two named open classes
+(white-panel-interior ambiguity; white-pockets-in-dark-layouts). Recommended next step for the
+white-panel class — the v14 brief's scoped micro-net local classifier (synthetic-only
+training) — flagged for explicit go-ahead, not launched.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset

@@ -195,3 +195,28 @@ mechanism attempt is logged here with its measured result:
   detector validated at precision 1.000 (~280k flagged px, zero false positives) before use;
   subtracting its detections removed the residual 135k px at zero under-del cost. Result:
   zero detected border-crossing leakage on all 7 gold parts (v3).
+- **v14 seed attempt 1a — barrier-split the hard mask, rule unchanged: REJECTED** (2026-08-07).
+  Split-off pure-white panel interiors get seeded WHOLESALE -> over-del guard violated
+  (fit page over 0.18%->2.18%; 001-3 +0.51pp).
+- **v14 seed attempt 1b — barrier-split + gray>=250-GATED seeding + frac250 relaxed to 0.90:
+  ADOPTED as v4** (2026-08-07). Gold-part white-track error median 8.77%->3.22%, worst
+  16.85%->8.35%, over-del DOWN on every gold part, leakage stays zero. Flagged cost: the
+  fit page's judgment-class document panel is re-exposed (+1.96pp over there; page total
+  2.65%, still within its 3.0% bar) — bright-white-content panels with broken frame rings
+  remain the track's top judgment-class defect, matching the original v1-v2 flood-fill
+  lesson above (structure, not color, decides).
+- **v14 seed attempt 1c — stronger split barrier Canny(30,90): NO-OP** (2026-08-07).
+  Byte-identical results to 1b; the 60/120 edges already split everything splittable.
+- **v14 new-class attempt — page-adaptive white-band height rule: REJECTED, decisive**
+  (2026-08-07). Against the white-panel-interior ambiguity surfaced by the synthetic breadth
+  test (a full-bleed panel's pure-white interior is locally identical to a gutter: white band
+  between two full-width black bars — the original v1-v2 flood-fill lesson in classical form,
+  and NOT a v4 regression: v3 fails the same 5 synthetic pages WORSE, 17-44% vs 15-20%).
+  Excluding tall-outlier bands (K x median height, K swept 1.5/2.0/3.0) fixed NONE of the
+  synthetic outliers (their interiors don't register as uniform white bands) and
+  catastrophically broke real pages (+31-39pp under-deletion — real gutters became "tall
+  outliers" against text-gap-dominated medians). The demonstrated cross-distribution
+  fragility is itself the evidence that layout-statistics heuristics won't hold this class;
+  the information is structural/semantic, not local. Recommended next step (NOT launched,
+  needs explicit go-ahead): the scoped micro-net local classifier from the v14 brief,
+  synthetic-only training per project rules.
