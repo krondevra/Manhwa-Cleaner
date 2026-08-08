@@ -2632,7 +2632,11 @@ C. LOCAL BACKGROUND RECLAIM — the v15 gated-seed idea generalized to pockets: 
 
 **Regression battery (pre-stated guards) PASS**: gold deltas −0.20 to +0.11pp (four parts
 improved), fit page −0.15pp (3.10%), all 15 passing synthetic pages stay ≤3%. Shipping file
-verified to reproduce battery numbers exactly.
+verified to reproduce battery numbers exactly. **Per-step attribution completed 2026-08-08**
+(ladder v5→+C→+C+A→+C+A+B through the full battery): C −0.061..+0.034pp/part (fit −0.021);
+A −0.172..+0.069pp/part (fit −0.133 — removes JPEG residue counted as under-white); B
+≤0.01pp on battery pages (its evidence is its target examples). Every rung individually
+passes all guards.
 
 **Rejected on measurement**: cluster-3 attempt 3 (2px ink dilation in ring composition) —
 −3% residual on the 666-class for 9.4k px of leak into kept text counters.
@@ -2650,7 +2654,12 @@ Resuming BandNet later inherits v6 unchanged.
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
    changes. When adding N new things, isolate at least the ones with any
-   plausible interaction risk into separate runs.
+   plausible interaction risk into separate runs. When a remedy is
+   inherently multi-knob (a coupled pair, a stabilization bundle), complete
+   the factorial — or isolate post-hoc on the same data/seeds — before the
+   record is considered closed (2026-08-08 completions: BandNet lr/decay,
+   v14 seed-rule 2x2, v16 per-step battery ladder; measurement bookkeeping
+   like best-checkpoint selection is exempt, it is not a training variable).
 2. **Any new background-color variant needs an explicit boundary marker,
    proven present in the actual saved bytes** — not just intended by the
    code. The JPEG bug above shows intent and actual bytes can silently

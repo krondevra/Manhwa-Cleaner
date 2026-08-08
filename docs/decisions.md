@@ -296,3 +296,12 @@ mechanism attempt is logged here with its measured result:
   targeting the 666-class note-text pockets): REJECTED — bought -3% residual there while
   leaking 9,365 px into kept bubble-text counters. 666-class large fragmented pockets remain
   a documented residual.
+- **v16 per-step battery attribution — COMPLETED 2026-08-08** (the A/B/C steps had entered
+  the regression battery jointly; the ladder v5 -> +C -> +C+A -> +C+A+B was run through the
+  full battery). Marginal deltas on gold white-track: **C** = small improvements or neutral
+  everywhere (-0.061 to +0.034pp/part; fit page -0.021pp); **A** = mixed-small (-0.172 to
+  +0.069pp/part; fit page -0.133pp — A removes JPEG residue the fit page counted as
+  under-white); **B** = near-neutral on battery pages (<=0.01pp everywhere; its evidence is
+  its measured target examples — battery pages carry few under-frame lines). EVERY rung
+  individually passes all guards (no part regresses > 0.3pp at any step; synthetic
+  passing-15 stays clean at every rung) — the v16 adoption stands with per-step attribution.
