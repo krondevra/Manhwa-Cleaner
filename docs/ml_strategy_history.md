@@ -2453,6 +2453,28 @@ the closed mistake. **The flat near-black ambiguity is measured indistinguishabl
 final for this project's constraint envelope (from-scratch, MIT-clean, synthetic-only
 training, local compute, no true scene understanding).**
 
+### PLAN v12 (2026-08-07 11:35-11:56 EEST): pipeline-v2 manual procedure replicated as classical CV — ~94% deterministic, judgment share measured at 2.82% of page
+
+User provided a complete manual-clean reference for `005-1.png` (source + cleaned RGBA + PSD +
+prose procedure, `.tmp/scripts-manual/`). Task: determine whether the manual procedure is a
+deterministic algorithm. PSD read as ground truth (img-layer mask == cleaned alpha, agreement
+1.000000). Result: **standalone classical-CV script reproduces the manual reference at over
+2.32% / under 0.49% / total 2.8159% of page.** Key findings: (1) the JSX 4-mask builder is
+fully deterministic — calibrated pixel-semantics against the PSD's own mask rasters (Photopea
+`adjustLevels` applies gamma as a DIRECT exponent; lightness desaturate; strict-> threshold;
+square-kernel min/max; 99.2-99.7% agreement, residual = merge-time AA rendering); (2) the
+hard-white magic-wand selection is perfectly rule-expressible (edge-touching + paper-white-in-
+source components; 52 px seed error); (3) the soft-white extension only matches the reference
+as per-pixel paper-white gating within the wand extent (wholesale component selection
+over-deletes 5.9-7.9% in every fitted rule variant — the components genuinely merge background
+with panel interiors, the prose's own "flood fill leakage"); (4) `repair_frame_interiors`
+deterministically replaces half the manual frame-protection work (2.67pp); the rest — broken-
+frame cases, crowned by a 373k-px framed white document panel whose ring is broken by an
+overlapping bubble — plus SFX-outline/cloud-text brushwork is the measured judgment share.
+Fitted-to-this-page thresholds; generalization untested and not claimed; white-bg domain only
+(does not reopen v9-v11's closed dark-page ambiguity). Full addendum:
+`.tmp/scripts-manual/pipeline-v2.md`; deliverable `replicate_pipeline_v2.py`.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset

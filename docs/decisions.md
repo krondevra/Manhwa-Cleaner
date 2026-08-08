@@ -177,3 +177,4 @@ Successful:
   train → test on unseen → fix failures → repeat); and semi-automatic
   mask/ROI generation plus Photoshop-style parameter search (separate
   black/white, hard/soft profiles) for hard cases such as black backgrounds.
+
