@@ -2475,6 +2475,50 @@ Fitted-to-this-page thresholds; generalization untested and not claimed; white-b
 (does not reopen v9-v11's closed dark-page ambiguity). Full addendum:
 `.tmp/scripts-manual/pipeline-v2.md`; deliverable `replicate_pipeline_v2.py`.
 
+### PLAN v13 (2026-08-07 12:24-12:32 EEST): v12 generalization measured DEGRADED (causes decomposed); flood-leak defect fixed (Canny barrier + validated leak post-filter, zero detected leakage on all 7 gold parts)
+
+New gold set: 10 per-part PSDs (`.tmp/saved/psd/new-gold/`, May-era pipeline-v1 vintage, all
+with clean img-layer masks >=99.96% binary). Dark check (mandated): 033-2/3/4 majority-dark
+(dark frac 0.57/0.59/0.66) -> excluded from the white track; 033-1 NOT majority-dark (median
+216, dark 0.248 -- same profile as 002-1) -> included FLAGGED. Part heights confirm gold-033 ==
+harness "035".
+
+**Phase 1 generalization (frozen 005-1-fitted constants, pre-stated bars all<=6%/median<=4%):
+DEGRADED** — totals 5.0-34.7%/part, but decomposition shows the failure is under-deletion, in
+two measured causes: (a) dark background (out of white-track scope entirely; up to 24.8pp on
+001-1); (b) a REAL transfer failure: on these chapters bright mid-gray content (100-230) merges
+with white gutters inside hard-white components (the hard-white recipe passes everything
+brighter than ~gray 20), diluting frac250 to 0.45-0.80 -> seed rule misses -> 2.5-15.9%/part of
+pure-white background never deleted (the background itself is just as pure as 005-1's --
+white-point hypothesis measured and rejected). Over-deletion stayed 0.17-2.27% everywhere.
+Note: the gold pages were manually cleaned with the v1 mask settings, not v2's.
+
+**Phase 2 reference-free leak detector** (`leak_detector.py`, barrier-split: deleted
+sub-components behind a closed near-black barrier with no page-edge connection): validated
+against GT BEFORE use — **precision 1.000 on every part with detections** (~280k flagged px,
+zero false positives); recall vs total over-deletion 0-24% by design (only border-crossing
+leaks are in its domain; source-broken borders undetectable by construction — stated
+limitation).
+
+**Phase 3 leak fix (closed in exactly 3 attempts)**: (1) near-black-stroke barrier = measured
+NO-OP by construction — gray<=40 px are already below the soft-white threshold (~43); floods
+cross through BRIGHT bridges (steam/AA gaps), not dark pixels. (2) **Canny(60,120) barrier**
+subtracted from soft-white before connectivity: −52% detected leakage overall, 5/7 parts to
+zero, over-del down on EVERY part, under-del cost <=0.06pp/part. (3) **leak-detector
+post-filter** (justified by its validated 1.000 precision): removes the remaining 135k px
+(001-3's steam/soft-gradient cases) at zero under-del cost. After both: **zero detected
+border-crossing leakage on all 7 parts**; canonical labeled example: bright-skin/steam flood
+into a character's torso through a steam-broken outline (`.tmp/scripts-manual/leak_examples/`).
+Deliverable: `replicate_pipeline_v3.py` (v2 left intact).
+
+**Phase 4 comparative note — why SmallUNet leaks less at borders**: its 7-channel input
+hard-codes edge awareness (threshold/morph-open/morph-close/CANNY guidance channels,
+docs/decisions.md — deliberately encoding this same manual workflow), so every per-pixel
+decision sees the edge map; the classical chain's flood is pure connectivity with no barrier
+term until v3 added exactly that (a Canny barrier) — converging on the same design insight
+from the opposite direction. The v3 post-filter has no SmallUNet analogue (topology-level
+reasoning; nearest relative is reclaim_landlocked_delete_islands' inverse).
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset

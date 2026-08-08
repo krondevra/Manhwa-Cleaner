@@ -178,3 +178,20 @@ Successful:
   mask/ROI generation plus Photoshop-style parameter search (separate
   black/white, hard/soft profiles) for hard cases such as black backgrounds.
 
+## Classical replication track (2026-08-07, plans v12+) — attempt log
+
+The manual pipeline-v2 procedure was replicated as deterministic classical CV
+(`.tmp/scripts-manual/replicate_pipeline_v{2,3,4}.py`); per this track's rule, every
+mechanism attempt is logged here with its measured result:
+
+- **v13 leak attempt 1 — near-black-stroke barrier: NO-OP** (2026-08-07). Subtracting
+  gray<=40 strokes from the soft-white mask changes nothing: those pixels are already below
+  the mask's own threshold (~43). Floods cross BRIGHT bridges (steam, anti-aliasing gaps),
+  never dark pixels. Kept as the diagnosis that redirected the fix.
+- **v13 leak attempt 2 — Canny(60,120) barrier on soft-white: ADOPTED** (2026-08-07).
+  −52% detected border-crossing leakage, 5/7 gold parts to zero, over-deletion down on every
+  part, under-del cost <=0.06pp/part.
+- **v13 leak attempt 3 — leak-detector post-filter: ADOPTED** (2026-08-07). The barrier-split
+  detector validated at precision 1.000 (~280k flagged px, zero false positives) before use;
+  subtracting its detections removed the residual 135k px at zero under-del cost. Result:
+  zero detected border-crossing leakage on all 7 gold parts (v3).
