@@ -346,3 +346,18 @@ mechanism attempt is logged here with its measured result:
   synthetic UI-window negatives; + 690-width scale alignment) tops out at 2.5k captured
   benefit — 40x short. v7 remains production; no v8 file. Gutter/BandNet stays closed. The
   semantic floor now confirmed at region scale in both rule and classifier paradigms.
+- **v21 spiky-cloud + border-residue round: spiky ACTION mechanized and verified (GUI
+  track), auto-scope honest negative; border residue = coverage gap, FIXED — v8 SHIPS
+  (= v7 + A'3 sandwich-gated [230,256) border sweep)** (2026-08-08). Spiky: manual recipe
+  decoded from `spiky-clauds/` and verified exactly (tol-200 = min-channel>=55, 100.00% of
+  etalon deletions; crop at (26,77363) in 019.png byte-identical); `clean_spiky_region`
+  bbox action: 19,268 under-del -> ~300, over 0 above the frame line; automatic scope
+  failed a 3-attempt ladder (unscoped +19.8M over on ch001 GT; enclosure-annulus flood
+  safe but 31% recovery; non-connective solves crop but false-positives include a face) —
+  object-level semantics, same wall as v20 D/F. Border residue: v5->v6->v7 ladder on new
+  full-chapter manual etalons shows a monotone trail (no regression); [250,256)+[230,240)
+  bands near frames were never covered (26.7k/53.7k px on 001/002); A'3 (sandwich gate:
+  <=3px from both ink and deletion) is net-positive on 001/002 AND the 035 holdout, added
+  over-del is 90% <=4px frame-hugging slivers (1 px GT-AA); battery: all gold parts
+  improve, fit improves, failing-5 untouched, guard flags visually verified. v8 default =
+  v7 + A'3; steps='' = v7-exact; spiky auto variants retained as documented negatives.

@@ -2736,6 +2736,51 @@ region-classifier): the accept decision requires knowing what the artist intende
 ~12.5% semantic floor's region-scale expression. Adversarial guard + battery were not
 reached (nothing shipped). Full logs: `.tmp/scripts-manual/v20_*.log`.
 
+### PLAN v21 (2026-08-08 15:29-16:05 EEST): spiky-cloud manual pipeline decoded — ACTION deterministic and verified, SCOPE is the locality wall (GUI track); border residue classified as a coverage GAP and FIXED (v8 ships = v7 + A')
+
+**Task 1 — spiky clouds.** New reference material `spiky-clauds/` (019-2 paired crop +
+binary-alpha etalon + PSD + Russian process note) decoded and VERIFIED, v12-style:
+the manual Magic Wand tol=200/contiguous-OFF step is exactly "min-channel >= 55" (100.00%
+of etalon-deleted px satisfy it, p0.1 = 57); the MinMax1/interior-fill steps exist to seal
+the spiky contour and wholesale-keep its interior. Crop located exactly in 019.png at
+(26, 77363) (template score 1.0000, byte-identical). v7 baseline there: 0 over / 19,268
+under. **The ACTION given a human region is fully deterministic**: `clean_spiky_region`
+(replicate_pipeline_v8.py) achieves over 0 / under ~300 above the frame line; the only
+etalon disagreement (2,396 px) is below the frame line, in the zone the note itself says
+was manually restored. **The SCOPE is not classically derivable** — 3-attempt ladder, all
+negatives (a1 unscoped flood: INVALID as measured — leaky large-kernel geodesic crossed
+thin barriers; corrected: +19.8M/+15.5M over-del on ch001/002 vs manual chapter GT; a2
+gap-sealed-enclosure annulus + exact flood: safe but recovers only 31% of the crop target,
+and on chapters +430k/+385k over for 80k/186k under; a3 non-connective in-annulus: crop
+solved (under 96) but 53k suspicious in one 35k slab — false-positive "enclosures" include
+forest art and a character's face). Choosing WHERE tol-200 applies = recognizing "floating
+spiky SFX cloud" = the same object-level semantics as v20's D/F. Spiky clouds move to the
+manual/GUI track with the verified action as the tool. Reuse statement: the action reuses
+`_protected_interiors` + adds a 1px-close sealing step; no new paradigm.
+
+**Task 2 — border residue: classification (a) GENUINE GAP, with evidence; fixed.** New
+full-chapter manual etalons (`.tmp/minmax/other/`, AA alpha binarized at 128; 035 etalon
+verified dy=0, bottom-trimmed 480 rows). Version ladder v5->v6->v7 on 001/002 border zones
+(within 10px of >=100px horizontal dark runs), under-deletion by gray band: NO band worsens
+at any rung (not a regression); v16-A closed [240,250) (2,582->280 on 001) and E3 closed
+[185,230] (10,076->1,618), but [250,256) (26,705 / 53,694 px on 001/002) and [230,240)
+(~2-3k) were never covered by any mechanism — a coverage gap. **Fix ladder (one variable
+per attempt):** A'1 ungated [230,256) sweep: net NEGATIVE (over +505k on ch001 — 10x
+overshoot, eats kept white AA page-wide); A'2 frame-zone gate: still net negative
+(+35.8k over / -22.8k under); **A'3 sandwich gate (band px must be <=3px from BOTH dark
+ink and existing deletion): first net-positive on all three chapters** — ch001 over
++17,425 / under -22,380; ch002 +11,383/-18,392; ch035 HOLDOUT +3,353/-5,286. The added
+"over" is 90% thin (<=4px) frame-hugging slivers, median 2 px, only 1 px of GT-AA overlap
+— visually verified on ch001 and 007 renders as the residue class itself (the etalon's own
+1-2px hand-cleaning inconsistency), zero text/bubble/art content.
+
+**Battery (v8 = v7 + A'3):** gold parts ALL improve (deltas -0.0022 to -0.0172pp, no
+regressions; median 2.3663% vs 4.0% bar); fit 005-1 3.0911% (-0.0061pp); synthetic
+passing-15 all <=0.17%, failing-5 byte-identical to v7 (deltas +0.0000pp — pre-existing
+documented residuals, not A' effects); adversarial guard flags on 007/008 (5,806/4,034 px)
+visually verified as the sliver class (80% thin, max component 116 px). SHIPPED as v8
+default; `clean_page(steps='')` reproduces v7 exactly.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
