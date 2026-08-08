@@ -2673,6 +2673,69 @@ F fused-gap pockets — effective variants bite margin-adjacent art (35k suspici
 variant captures nothing; the class stays open. Both echo the standing lesson: locality
 judgment, not pixel statistics, is the missing ingredient.
 
+### PLAN v20 (2026-08-08 11:44-13:35 EEST): region-selection round for D/F — candidate GENERATION solved classically (recall 2/2 both classes); the ACCEPT decision failed classical rules AND scoped classifiers; both classes to the manual/GUI track
+
+The round tested the one thing v19 never tried: mechanizing the manual recipes' REGION
+SELECTION step before the sweep, with a scoped classifier held in reserve for the
+accept/reject decision only.
+
+**Sub-effort 1 — candidate generation: SOLVED CLASSICALLY.** `region_candidates.py`
+(`.tmp/scripts-manual/`). D: glyph-scale ink components (20-4,000 px) dilate-clustered into
+blocks + (attempt 2) a large-floating-component path (4k-200k px single components — the
+synth diagnostic showed SFX letters at 40k-120k px are invisible to the glyph path) +
+(attempt 3) min-glyphs 3->2 (the 444-sfx instance is a 2-component cluster). Recall 2/2
+(007 translator-note ring_del=0.50; 008 444-sfx ring_del=0.85), 768/673 candidates per
+chapter. F: bright-pocket components (>=240, undeleted, unprotected) with ring features;
+attempt 2 raised the area cap 60k->120k (the 222-edge pocket is 88,446 px). Recall 2/2,
+231/121 candidates per chapter. **Answer to the brief's question: candidate generation is
+NOT the ML-requiring bottleneck — no ML needed for proposals.**
+
+**Sub-effort 2a — classical accept rules: FAIL (pre-stated bars: total harm <= 5,000 px,
+benefit >= 100,000 px, fit=001/002 holdout=033-1).** Ground truth: every gold candidate
+labeled by measured benefit (would-sweep px that are GT-delete) vs harm (GT-keep). Pools
+are ~94% harmful (D: 41 good vs 630 harmful of 857; F: 44 vs 558 of 610); total harm pool
+3.5-4.1M px vs 219-272k benefit. Best D rule (ring_del>=0.7, ink<=0.05, prot=0): 52,621
+benefit / 120,667 harm. Best F rule: ZERO benefit before harm floods. Feature IQRs overlap
+at the quartiles; scalars cannot carry the decision.
+
+**Sub-effort 2b — scoped classifiers (CandidateNet, 50,177 params, 3x96x96 context crop
+[gray/v7-delete/protected] + 7 scalars, BCE pos-weight, Adam 3e-4, best-ckpt on synth val;
+100% synthetic training per mandate: sfx-stage pages for D, bubbles-stage for F, 2,000
+train + 200 val pages each; checkpoints in `.tmp/checkpoints/candidate_classifier/`, never
+committed).**
+
+- **F: STRUCTURAL NEGATIVE after attempt 1** (synth val prec@rec50 = 1.000 — the synthetic
+  boundary is perfectly learnable — yet on gold the ranking INVERTS: top-30 scored = 26
+  harmful / 3 good; good candidates score median 0.003; thr 0.9 buys 18k benefit at 449k
+  harm). The montage diagnosis (`.tmp/scripts-manual/v20_f_gold_diag.log`, scratchpad
+  montage): the top-scored harmful regions are the manhwa's SYSTEM-UI WINDOWS — dark
+  panels, white borders, white text, semantically KEEP — which are locally identical to the
+  synthetic "deletable bright pocket" pattern. A label collision in the training
+  distribution itself (same local appearance, opposite label) plus wrong-looking positives
+  (real good pockets are AA fringes/textured gradients, not P&C's clean white boxes). No
+  single synthetic-only change fixes both directions; attempts 2-3 declared infeasible with
+  the mechanism stated rather than burned blind.
+- **D: HONEST NEGATIVE after the full 3-attempt ladder.** Attempt 1 (plain synth):
+  transfers directionally (gold good median score 0.268 vs harmful 0.02 — correct ordering,
+  unlike F) but no operating point: thr 0.5 = 123.8k benefit / 114.7k harm. Dominant harm
+  mode = the same system-UI windows. Attempt 2 (composite synthetic UI-window negatives —
+  dark panel + white border + white text, GT=keep — onto synth pages at extraction; the
+  missing negative class IS synthesizable): harm now clears the cap at a real threshold but
+  captures only 2,541 benefit of the 100k bar (fit 2,171/2,454; holdout 370/1,099). Attempt
+  3 (+ scale alignment, synth resized 910->690 width to match real glyph/AA scale):
+  2,425/3,362 — no material change. Needed ~40x more captured benefit at fixed harm; no
+  remaining single-variable mechanism plausibly yields it.
+
+**Verdict (pre-committed discipline): NO SHIP.** v7 unchanged, no v8 file created. D
+(floating-text halos) and F (edge fused gaps) move to the manual/GUI track. Gutter/BandNet:
+stays closed — the shared region structure this round found (proposals easy, accept
+semantic) reproduces BandNet's own failure shape, so nothing is reopened. The etalon prizes
+forgone: ~2.2k px (D) + ~1.9k px (F) per affected page-instance. The through-line now
+proven at FOUR granularities and TWO paradigms (per-pixel, band, region-rule,
+region-classifier): the accept decision requires knowing what the artist intended — the
+~12.5% semantic floor's region-scale expression. Adversarial guard + battery were not
+reached (nothing shipped). Full logs: `.tmp/scripts-manual/v20_*.log`.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset

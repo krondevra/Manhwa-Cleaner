@@ -332,3 +332,17 @@ mechanism attempt is logged here with its measured result:
   touch the deleted margin). No variant is both safe and effective. Class stays open; the
   SFX-punch-through guard was never violated by the shipped config (E-only adds no
   deletions beyond frame-adjacent AA strips).
+- **v20 region-selection round (D floating-text halos, F edge fused gaps): candidate
+  generation SOLVED classically, accept decision FAILED both classically and with scoped
+  synthetic-trained classifiers — NO SHIP, both classes to the manual/GUI track**
+  (2026-08-08). Generation (`region_candidates.py`): D recall 2/2, F recall 2/2 on known
+  instances after 3/2 attempts (glyph clusters + large-component path + min-glyphs 2; pocket
+  area cap 120k). Accept: gold candidate pools are ~94% harmful (3.5-4.1M px harm vs
+  219-272k benefit); best classical rule 52.6k benefit/120.7k harm (D), 0 benefit (F) vs
+  bars harm<=5k benefit>=100k. Classifiers (50k-param CandidateNet, 100% synthetic): F
+  inverts on gold (top-30 = 26 harmful; the manhwa's system-UI windows are locally identical
+  to synthetic "good" pockets with opposite label — structural negative, attempt 1 + stated
+  infeasibility); D transfers directionally but the full 3-attempt ladder (plain synth; +
+  synthetic UI-window negatives; + 690-width scale alignment) tops out at 2.5k captured
+  benefit — 40x short. v7 remains production; no v8 file. Gutter/BandNet stays closed. The
+  semantic floor now confirmed at region scale in both rule and classifier paradigms.
