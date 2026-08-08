@@ -305,3 +305,30 @@ mechanism attempt is logged here with its measured result:
   its measured target examples — battery pages carry few under-frame lines). EVERY rung
   individually passes all guards (no part regresses > 0.3pp at any step; synthetic
   passing-15 stays clean at every rung) — the v16 adoption stands with per-step attribution.
+- **v19 issue 2 classification — border artifacts: RELATED-BUT-DISTINCT band, new mechanism
+  E** (2026-08-08). The 007 etalon triplet (`.tmp/minmax/`, alpha-decoded: ZERO over-deletion
+  vs the etalon on the crop, 4,884 px under-deletion in three classes) shows the "grayish
+  line" strip at gray p50=191 — BELOW v16 step B's [200,230] floor — and on the BACKGROUND
+  side of the frame line, which B's below-only trigger cannot reach. Not a regression of the
+  v16 fix; a distinct band+geometry.
+- **v19 E (frame strip): E3 ADOPTED into v7** (2026-08-08; 3 attempts). E1 (any-dark-within-
+  4px) -486/+455 on the etalon crop — rejected, cost equals benefit; E2 (long-horizontal-run
+  trigger >=100px) -334/+72; E3 (E2 + geodesic reachability from deleted background through
+  the [185,230] band, <=8px) -334 under / ZERO over on the crop, page-wide flagged pixels
+  visually verified as frame-adjacent background AA. Battery: every gold part improves
+  slightly (deltas -0.0002..-0.0089pp), fit +0.0005pp, synth clean.
+- **v19 D (floating-text halo sweep, the user's manual "select by color threshold 23"
+  recipe mechanized): HONEST NEGATIVE, 3 attempts** (2026-08-08). D1 blur-context (17.2k
+  suspicious px on 007 — symmetric context bites panel interiors near borders); D2
+  geodesic-25 (301k — 25px bright-erosion ribbons along every inkless art/background
+  boundary); D3 geodesic-6 + 2k-px component cap (87k — ribbons arrive in cap-sized
+  chunks). Root cause of failure: the manual recipe works because a HUMAN selects the
+  floating-text region first; that locality judgment has no safe classical proxy found.
+  Etalon upside forgone: ~2.2k px on the reference crop. Class stays open.
+- **v19 F (page-edge fused-gap pockets, the v16 222-class): HONEST NEGATIVE, 3 attempts**
+  (2026-08-08). F1 ring-0.60 (-423 px, but 35.5k suspicious page-wide — the edge-contact
+  test is trivially satisfied by full-height margin deletions); F2 ring-0.55 (-663, same
+  flaw); F3 margin-adjacency (safe but captures -5 px — the fused gap does not actually
+  touch the deleted margin). No variant is both safe and effective. Class stays open; the
+  SFX-punch-through guard was never violated by the shipped config (E-only adds no
+  deletions beyond frame-adjacent AA strips).

@@ -2650,6 +2650,29 @@ small local pockets/bands with unambiguous GT; none touches the full-width white
 ambiguity, and the 5 failing synthetic pages' numbers are byte-identical before/after v6.
 Resuming BandNet later inherits v6 unchanged.
 
+### PLAN v19 (2026-08-08 08:11-08:56 EEST): 007 etalon round — E3 frame-strip fix shipped (v7); halo-sweep and fused-gap mechanisms closed as honest negatives after full 3-attempt ladders
+
+New reference triplet (`.tmp/minmax/007_{init,cleaned,etalon}.png`, alpha-decoded; the crops
+are sub-pixel-resampled vs the source page, so evaluation uses an embedded-crop harness —
+init crop pasted into the page at the located offset y=26389, verified 0.9952 mask agreement
+with the user's own cleaned crop). True defect map: ZERO over-deletion vs the etalon; 4,884
+px under-deletion in three classes: the page-edge fused gap (1,933 px, v16 222-class), the
+gray-191 frame strip (365 px — below v16 B's [200,230] floor AND on the background side of
+the frame line, i.e. related-but-distinct, not a regression), and floating-text AA halos
+(user's manual recipe: select-by-color threshold 23 = gray>=232, applied locally by hand).
+
+**Shipped (v7 = v6 + E3)**: frame-strip rule — band [185,230], within 2px of a >=100px
+horizontal dark run, geodesically reachable from deleted background through the band. Etalon
+-334 px at zero over-del; page-wide flags visually verified as background AA; battery PASS
+with every gold part slightly improved.
+
+**Honest negatives (full ladders, page-wide safety guards decisive)**: D halo sweep — three
+mechanizations of the manual recipe all fail page-wide (17k/301k/87k suspicious px on 007);
+the human's implicit "this is a floating-text region" selection has no safe classical proxy.
+F fused-gap pockets — effective variants bite margin-adjacent art (35k suspicious), the safe
+variant captures nothing; the class stays open. Both echo the standing lesson: locality
+judgment, not pixel statistics, is the missing ingredient.
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
