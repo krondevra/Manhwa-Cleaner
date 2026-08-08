@@ -220,3 +220,42 @@ mechanism attempt is logged here with its measured result:
   the information is structural/semantic, not local. Recommended next step (NOT launched,
   needs explicit go-ahead): the scoped micro-net local classifier from the v14 brief,
   synthetic-only training per project rules.
+- **v15 Track 2 — soft-gradient barrier: ADOPTED into v5** (2026-08-07). 001-1's
+  "white-pockets" miss re-diagnosed: NOT dark-layout pockets and NOT band-ambiguity — the
+  residual seed-merge failure at page scale (title-transition fades merge white background
+  into 2.5M-px components at frac250 0.36-0.44, below any workable bar; Canny can't cut soft
+  gradients). Fix: add |grad(Gaussian(gray, sigma 8))| > 1.0 to the hard-mask split barrier.
+  Measured: 001-1 under-white 8.33%->1.14%, 001-2 6.62%->0.50%, fit page total -0.83pp.
+  Flagged: 001-1 over-del +0.85pp exceeds the +0.3pp guard letter — accepted on the 8.5:1
+  exchange with visual confirmation the new over-del is the KNOWN white-inside-panel
+  ambiguity class, not new damage.
+- **v15 Track 1 — micro band classifier (BandNet, 24,691 params): HONEST NEGATIVE; hook
+  shipped OFF by default** (2026-08-07; attempt log corrected 2026-08-07 per the
+  one-variable-per-run discipline — the original "attempt 2" conflated data scale AND loss
+  balancing in one run; both variables were re-run in isolation on the SAME data/seeds, and
+  the record below is the corrected, isolated version. The isolated numbers CHANGED THE
+  ATTRIBUTION but NOT the verdict).
+  Attempt 1 (250 pages, plain BCE, lr 1e-3, save-last): frozen at the 9:1 class prior
+  (val_acc 0.9149 = the gutter fraction).
+  Attempt 2a (loss ISOLATED: 250 pages + pos_weight, all else = attempt 1): breaks the
+  prior-freeze immediately (interior-recall 1.000 from epoch 1) but OSCILLATES violently
+  (gutter-recall 0.000-0.965 across epochs) — **the oscillation is caused by the loss
+  balancing, not the data scale**.
+  Attempt 2b (data ISOLATED: 1k pages, plain BCE): prior-frozen for ~6 epochs, then escapes
+  SLOWLY without any balancing, reaching balanced 0.849 by epoch 15 (gutter 0.785 / interior
+  0.913) — **data scale alone was nearly sufficient given enough epochs; balancing bought
+  speed at the cost of stability** (this corrects the original entry's "imbalance + data
+  starvation" framing).
+  Attempt 3 (lr 3e-4 + StepLR decay + best-checkpoint selection, 1k + pos_weight): STABLE,
+  val balanced-acc 0.874 (interior 0.957 / gutter 0.792). Bundling judgment, stated rather
+  than excused: best-checkpoint selection is measurement bookkeeping (which artifact is
+  kept), not a training variable; lr+decay is the single diagnosed remedy for 2a's measured
+  oscillation.
+  VERDICT (unchanged, now verified on every variant): the integration's cost structure is
+  asymmetric — protecting one misclassified gutter band costs its whole area — requiring
+  gutter-recall >= 0.995, and the operating-point sweep shows interior-recall collapsing
+  there on ALL trained variants: attempt 3 best 0.00-0.11; isolated 2a 0.000-0.125 at
+  gutter-recall 1.0; isolated 2b 0.109 at 1.0 (0.283 at 0.991). NO viable operating point,
+  regardless of which variable is isolated. Battery with hook ON: fixed 2/5 target pages,
+  collapsed 7 previously-passing synthetic pages to 15-33% under-deletion. Class stays OPEN;
+  checkpoints kept in .tmp for future experiments (richer context is the untested axis).

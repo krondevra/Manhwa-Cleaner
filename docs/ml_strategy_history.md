@@ -2551,6 +2551,50 @@ generalization bars remain unmet with the residual now attributed to two named o
 white-panel class — the v14 brief's scoped micro-net local classifier (synthetic-only
 training) — flagged for explicit go-ahead, not launched.
 
+### PLAN v15 (2026-08-07 12:57-13:20 EEST): Track 2 diagnosis overturned the "dark pockets" label and closed it classically (v5); Track 1 micro-net = honest negative (no viable operating point); v13's generalization bars now PASS
+
+**Track 2 (run first — its overlap verdict gated Track 1's scope)**: 001-1's 8.33% under-white
+re-diagnosed. NOT white-pockets-in-dark-layouts (context measured bright: ctx_dark 0.01-0.08)
+and NOT the band-ambiguity class — stage attribution showed the loss at the SEED stage: the
+missed regions (chapter-title transition zones) live inside 1.1-2.5M-px merged components at
+frac250 0.36-0.44, fused through SOFT gradients Canny cannot cut. The residual seed-merge
+mechanism at page scale. Classical fix, attempt 1, ADOPTED: add the low-frequency gradient
+(|grad(Gaussian sigma 8)| > 1.0) to the hard-mask split barrier. 001-1 under-white
+8.33->1.14%, and it also closed 001-2's residual (6.62->0.50%). Flagged: 001-1 over-del
++0.85pp exceeds the +0.3pp guard letter, accepted on the 8.5:1 exchange + visual confirmation
+the new over-del is the KNOWN white-inside-panel class. Partial overlap with Track 1 flagged
+(the residual over-del belongs to that class in principle).
+
+**Track 1 (micro band classifier, BandNet 24,691 params, synthetic-only fresh-seed data;
+attempt log CORRECTED 2026-08-07 to the one-variable-per-run standard — the original
+"attempt 2" conflated data scale and loss balancing; both were re-run in isolation on the
+same data/seeds)**: attempt 1 (250 pages, plain BCE) froze at the 9:1 prior. Isolated 2a
+(loss only: +pos_weight at 250 pages) breaks the freeze instantly but OSCILLATES violently
+(gutter-recall 0.000-0.965) — the oscillation traces to the balancing, not the data.
+Isolated 2b (data only: 1k pages, plain BCE) escapes the prior SLOWLY without balancing,
+reaching balanced 0.849 by epoch 15 — data alone was nearly sufficient; balancing bought
+speed at the cost of stability (attribution corrected from the original "imbalance + data
+starvation" framing). Attempt 3 (lr 3e-4 + decay + best-checkpoint; the lr+decay being the
+single diagnosed remedy for 2a's oscillation, best-checkpoint being measurement bookkeeping)
+trained STABLY to val balanced-acc 0.874 (interior 0.957 / gutter 0.792). **Honest negative
+at integration — verified on every variant**: the hook needs gutter-recall >= 0.995
+(protecting one misclassified gutter band costs its whole area), and the operating-point
+sweep collapses there on ALL trained variants (attempt 3: interior 0.00-0.11; 2a:
+0.000-0.125; 2b: 0.109 at 1.0). Battery with the hook ON: fixed 2/5 target pages but
+collapsed 7 previously-passing synthetic pages to 15-33% under-deletion. Hook shipped OFF by
+default in `replicate_pipeline_v5.py`; checkpoints kept in
+`.tmp/checkpoints/band_classifier/` (richer context is the untested axis). Classifier cost
+when enabled: 137 bands in 804 ms on a 50k-row part.
+
+**v5 shipping config final battery (hook off, all real numbers)**: gold white-track
+001-1 3.72% (was 10.06 at v4), 001-2 0.78%, 001-3 1.32%, 002-1 2.48%, 002-2 2.46%,
+002-3 1.80%, 033-1 7.01% (flagged part, +0.21 within guard); fit page 3.24% (+0.22, within
+guard); 15/20 synthetic pages 0.02-0.48%. **The six verdict gold parts now sit at median
+~2.1% / max 3.72% — v13's original generalization bars (all <=6.0%, median <=4.0%) PASS on
+the fair white-track metric for the first time.** Open classes after v15: white-panel-interior
+ambiguity (5 synthetic pages at 15-20%, Track 1's class, stays open) and the judgment-class
+document panel (fit page).
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
