@@ -386,3 +386,13 @@ mechanism attempt is logged here with its measured result:
   kept by 005-1's pre-recipe GT but deleted by the current verified recipe — a GT-era
   conflict, not content loss; default-on deferred until that GT is refreshed rather than
   restating a bar against disputed ground truth.
+- **v24 frame rounds: metric v1 retracted (source-thinness artifact; pipeline deletes zero
+  gray<=100 px) -> AA-nibble metric adopted as the standing spiky-action bar; frame-junction
+  nibble confirmed (S added 1.6k/0.8k/0.06k/0.2k px on 002/007/008/019) and fixed by a ±3px
+  frame-run protection band (97-100% removed); frame-interior damage (25,208 px inside
+  `_protected_interiors`, A' 11.2k + earlier 14.0k, spiky action zero) restored by enforcing
+  the existing protection as final step Q — v11 SHIPS (default = v10 + Q; steps='S' =
+  frame-guarded action)** (2026-08-09). Legit in-interior deletion measured at 3,122 px
+  total (one empty thin box, 002-2, white-on-white restore); battery PASS with every gold
+  part improving or holding and fit page -0.0144pp. Sealed-interior misclassification
+  deferred pending user crops.

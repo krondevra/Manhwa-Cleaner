@@ -2860,6 +2860,39 @@ defect class itself, not content loss. Per discipline, no bar restatement on dis
 honestly. Battery with S on: synthetic PASS, gold PASS (net improvement, three parts
 better), fit blocked as above.
 
+### PLAN v24 (2026-08-09 07:24-07:55 EEST): frame-junction nibble fixed (metric v1 retracted as artifact, AA-nibble metric adopted); frame-interior damage audited, attributed, and restored — v11 ships (default = v10 + step Q; S = frame-guarded action)
+
+**Metric honesty first.** The initially-designed frame-continuity metric (dark-support
+columns) showed 16/35 "broken" runs — but the pipeline deletes ZERO gray<=100 px anywhere,
+and a source-only control run showed the same breakage (mean 91.5%, 10/19 runs <99% with
+NO deletion): metric v1 measured source-line thinness, RETRACTED. Metric v2 (AA-nibble:
+deleted px with 100<gray<=230 within ±2px of a >=100px frame run) is the adopted standing
+bar for spiky-action changes.
+
+**Issue 1 — frame-junction damage: CONFIRMED under metric v2 and fixed.** v10's S action
+added 1,586/759/57/231 nibble px on 002/007/008/019-slab beyond the base pipeline. Fix
+(attempt 1, the A'-style band pattern): ±3px protection band around detected frame runs
+excluded from the spiky deletion (`clean_spiky_region_frameguard`, v11). Result: guard
+removes 97-100% of the S-added nibble (residual 42/5/0/0 px); base-pipeline nibble
+(1,652 px on 002, E3/A'-band class, battery-adjudicated in their rounds) is pre-existing
+and out of the spiky action's scope. Attempt 2 (orientation ownership) NOT NEEDED.
+
+**Issue 2 — frame-interior damage: audited, attributed, restored.** 10-part audit:
+25,208 px of over-deletion INSIDE `_protected_interiors` (per part 0-5,615 px; the spiky
+action contributes ZERO — identical with/without S). Attribution: A' 11,212 px + earlier
+steps 13,996 px; geometry: top instances are thin slivers hugging the interior side of
+frame lines (dilation-based conditions crossing thin lines — protection existed, steps
+bypassed it). GT-legitimate in-interior deletion across ALL parts: 3,122 px, a single
+thin empty box on 002-2 whose restore is white-on-white. **Reuse verdict: the user's
+hypothesis holds — enforcing the existing interior detection suffices.** Fix: step Q
+(`delete &= ~_protected_interiors`) in v11's DEFAULT path; 8:1 favorable trade measured
+before shipping.
+
+**Battery (v11 default): OVERALL PASS — every gold part improves or holds** (deltas
+-0.0028..-0.0163pp; 033-4 exactly 0 as audited; 002-2 still net-improves at -0.0031pp
+despite the restored box); fit page -0.0144pp; synthetic byte-stable; guard unchanged.
+Deferred per brief: sealed-interior misclassification (user to provide crops).
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset
