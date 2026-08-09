@@ -457,3 +457,51 @@ mechanism attempt is logged here with its measured result:
   crossings into panel art below the line, confirming class B is still open on those two
   instances specifically (019_0's 3.6% over not yet re-inspected visually this round).
   Proceeding to class B fix attempts next.
+- **v27 class B (residual silhouette leakage): 3 CONSECUTIVE FAILURES, STOPPING per the
+  rule — root-cause diagnosis + attempt log** (2026-08-09). Diagnosis first (render with
+  raw-run/bridged-run/action-added overlay on 019_3/019_6): `bridge_added=0` at both sites
+  — bridging never even triggers, because the panel below each of these two clouds has NO
+  detectable frame run near the boundary at all (the "line" is drawn as vertical
+  stripe/motion-line art, not a solid horizontal bar) — so the clip flood finds nothing to
+  stop it until it reaches a real line much further down the panel. This is a distinct
+  geometry from the v26 occlusion-bridging case (a hidden-but-present line) — here there
+  is no line to bridge to nearby.
+  Attempt B1 (ELLIPSE_MAX 1.45->1.20->1.05->0.95, single variable): monotonically trades
+  over-del for under-del at a ratio far worse than break-even, and the under-del cost
+  lands on EVERY instance including all previously-clean ones (e.g. 002_5 1.96%->11.46%,
+  019_5 0.22%->5.48% at 0.95) for only a partial over-del win on the 2 target sites (019_3
+  2.47%->0.09%, 019_6 1.88%->0.01% at 0.95). Net-negative at every tested value. FAIL.
+  Attempt B2 (RUN_KERNEL_W 101->61->31, single variable, ELLIPSE_MAX reverted to 1.45):
+  019_3 barely moves (2.468->2.397->2.256), **019_6 is EXACTLY unchanged at 1.879% at
+  every kernel width** (proving the leak there has zero relationship to run-detection
+  sensitivity), and under-del cost still appears on every instance at width 31. FAIL.
+  Attempt B3 (RING_PX distance-to-ink gate 80->50->30, single variable, RUN_KERNEL_W
+  reverted to 101): near-total no-op — 019_3 2.468->2.465, 019_6 1.879->1.827 even at the
+  aggressive 30px value, with negligible effect elsewhere. The leak pixels are apparently
+  immediately adjacent to real ink already (soup always is), so ink-proximity cannot
+  discriminate them from genuine soup. FAIL.
+  **STOPPING class B at 3 consecutive failures, per the pre-stated rule.** Root cause:
+  whether a given achromatic, ink-adjacent, in-ellipse pixel below an occluded/absent
+  frame line is "soup" or "panel art" is not resolvable by any of the three geometric
+  proxies tested (region-shrink, run-topology, ink-distance) — the same semantic-locality
+  wall this project has hit repeatedly (v20 D/F, v22 dark-backdrop). Residual: 019_0
+  3.644%, 019_3 2.468%, 019_6 1.879% over-deletion (all improved 3-6x from the v25
+  pre-fix baseline of 11.2/5.3/10.5%, but not closed). All three attempts' module flags
+  reverted to their pre-attempt (shipped v26) values; file verified unchanged by rerunning
+  the full battery+suite with a cleared cache — byte-identical PASS to the v26 state
+  (logs/v27_final_battery.log).
+- **v27 class A (frame-junction damage) re-verified on the current v12 (A+B+E+S)
+  config: CLEAN, no attempts needed** (2026-08-09). The AA-nibble metric (the v24-adopted
+  standing bar, not the retracted v1 source-thinness metric) measured 0 or negative added
+  nibble on all four reference regions vs the base pipeline: 002 -4px, 007/008/019slab
+  0px — all far under the v11 reference of 42/5/0/0. Verified with fresh numbers this
+  round, not assumed from v26.
+- **v27 FINAL STATUS: v12 (A+B+E+S, unchanged from v26 — no code changes shipped this
+  round) remains the candidate.** Session budget did not permit exhausting class B with a
+  4th novel mechanism beyond the pre-stated 3-attempt stop; this is the honest stopping
+  point per the rule, not a premature cutoff. Class C closed as a non-issue (mechanism
+  doesn't exist in this codebase). Class A confirmed clean. Class B stopped at 3 failures
+  with the residual documented above. Full battery+suite PASS confirmed on a fresh cache.
+  v10 remains production default; v12 remains the candidate pending the user's decision
+  on whether the class-B residual (3 instances, 1.9-3.6% over-del, all better than v11)
+  is acceptable to ship as-is.
