@@ -435,3 +435,25 @@ mechanism attempt is logged here with its measured result:
   bright art in the overlap zone — locally identical to soup; strict <= 0.3% bar unmet
   there, documented open). Standing infra: `v26_fullpage_suite.py` (12-instance PSD
   suite, required gate) + `v26_battery.py`.
+- **v27 step 1-2 (reconciliation, before any new fix): class C (interior text-glyph
+  dropout) does NOT reproduce on the current v12 (A+B+E+S) config — 0 dropout px measured
+  across all 12 instances, using the EXACT site-bbox geometry the action computes (not an
+  approximated crop window)** (2026-08-09). Root-cause check on the hypothesized
+  mechanism: `_enclosed` (replicate_pipeline_v8.py) marks ANY passable region not
+  border-connected as "interior," regardless of whether it is flood-connected to the
+  main bubble interior — so an isolated pocket like a letter's counter (e.g. О/Ф) already
+  forms its own tiny non-border-connected component and is already protected today. The
+  user's proposed mechanism ("connectivity-based flood-fill, single seed, continuous-ON,
+  can't reach isolated pockets") does not match this code's actual algorithm (closer to
+  "NOT reachable from the border" than "reachable from one seed"). Visual confirmation:
+  zoomed renders of 002_5 (dense paragraph) and 019_1 (text-heavy) show zero artifacts on
+  letters; the only px flagged are known ray-tip under-deletion, unrelated to glyphs.
+  **Class C: no fix needed, closing as a non-issue** (not a 3-attempt stopping-rule
+  exhaustion — the defect was never observed to begin). Reconciled the user's 019_2 visual
+  flag the same way: fresh v12 measurement shows 019_2 at 0.006% over (clean) with a clean
+  render — the leakage the user saw was almost certainly from the earlier v11 crops sent
+  before the v26 fix landed, not the current state. **019_3 (2.5% over) and 019_6 (1.9%
+  over) DO show real residual leakage** in fresh renders — small red bleed at ray/frame
+  crossings into panel art below the line, confirming class B is still open on those two
+  instances specifically (019_0's 3.6% over not yet re-inspected visually this round).
+  Proceeding to class B fix attempts next.
