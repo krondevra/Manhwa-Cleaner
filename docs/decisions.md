@@ -396,3 +396,31 @@ mechanism attempt is logged here with its measured result:
   total (one empty thin box, 002-2, white-on-white restore); battery PASS with every gold
   part improving or holding and fit page -0.0144pp. Sealed-interior misclassification
   deferred pending user crops.
+- **v25 DIAGNOSIS (no fixes): the PSD diagnostic set (12 instances) traces 002_5/002_6,
+  the v24 step-Q full-page regression, and "Issue 3" to ONE root cause —
+  `_protected_interiors` over-extension at full-page scale** (2026-08-09). Evidence
+  chain, all vs fresh PSD-etalon alpha GT: (1) both 002 sites WERE accepted by the v23
+  cascade (not a recall miss); (2) the under-deleted px are pure white (p50=255), not
+  ray ink, and only 0-5% lie in the action's sealed spiky interior — hypothesis of
+  sealed-interior misclassification REJECTED by measurement; (3) stage-by-stage: the raw
+  action INCREASES under-deletion (+39k/+41k px at the two sites) via its final
+  `&= ~(interior|prot)` restore line, and the restored px are 100%/100% inside
+  `_protected_interiors` — the full-page prot mask covers inter-panel background sealed
+  by full-width frames + page edges, and the action (since v8) wholesale-restores base
+  deletions there; (4) step Q (v24) is the SAME over-extension applied page-wide (002
+  under 10.4->21.8%, 019 deletion 39.4->18.0%); part-level batteries missed both because
+  50k crop edges unseal the geometry (NEW STANDING LESSON: interior/protection changes
+  must be validated at full-page scale). v23's site harness was additionally blind to
+  action UN-deletions (measured only added px). 019_3 = occlusion-gap leak: the cloud
+  body hides the panel frame line, so the v10 clip flood pours into the panel (over-del
+  5.2%); v11's Issue-1 band applied but covers a different geometry — and the
+  "presumed-normal" set is NOT clean: 019_0 (11.1% over), 019_6 (10.4%), 019_2 (4.9%),
+  019_4 (2.8%) share the same leak class; 019_1/5/7/8/9 are clean (over <=0.3%).
+  PROPOSED (not implemented): (a) fix `_protected_interiors` scope directly — an
+  interior must be bounded by a closed frame CONTOUR, not merely border-disconnected
+  (e.g., require an enclosing ink rectangle/contour, or cap interior area, or require
+  interior not to touch full-page-width frames on both sides); re-derive Q and the
+  action restore from the corrected mask; (b) occlusion leak — bridge collinear frame-run
+  segments across a spiky bbox before the clip flood; (c) re-validate everything at BOTH
+  part and full-page scale + the diagnostic set as a regression suite. v11 default
+  remains UNSAFE for full pages (use v10 or v11 steps='' equivalents until fixed).
