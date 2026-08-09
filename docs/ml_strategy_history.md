@@ -2893,6 +2893,43 @@ before shipping.
 despite the restored box); fit page -0.0144pp; synthetic byte-stable; guard unchanged.
 Deferred per brief: sealed-interior misclassification (user to provide crops).
 
+### PLAN v26 (2026-08-09 15:50-16:20 EEST): root-cause fix round — closed-contour prot (A) + occlusion bridging (B) + ellipse scope (E) + saturation gate (S); v12 passes suite+battery+GT, v11 deprecated
+
+**Part 1 — standing infrastructure.** `v26_fullpage_suite.py`: the 12-instance PSD
+diagnostic set as a permanent FULL-PAGE regression suite (per-config chapter-mask cache,
+v10-S reference table embedded, bars: clean sites <= 0.3% over, nothing worse than v10-S
+by > 0.3pp). `v26_battery.py` = the 10-part+synthetic+guard battery PLUS the suite as an
+additional standing gate — full-page validation is now a required bar.
+
+**Part 2 — fix ladder (all documented, incl. the two the brief didn't anticipate):**
+- **A (closed-contour `_protected_interiors_v2`)**: hole protected only if its
+  ink-adjacent boundary is >= 90% one connected stroke component on the UN-closed stroke
+  map. Fixes the root cause outright: 002_5 under 21.5->1.8%, 002_6 18.3->0.95%. Side
+  effect measured honestly: the old over-extended prot had been shielding panels at 3
+  019 sites; strict prot exposed the action leak there (019_5/7 clean->3.0/3.2% over).
+- **B (occlusion bridging)**: collinear frame-run close gated to rows with >= 100px of
+  genuine run on both sides. Kills the leak where a straight line exists (019_2/4 ->
+  0.006/0.006%) but not on irregular-boundary panels (019_0/3/6 unchanged).
+- **A+B**: both fix families combine without interaction regressions but 4 instances
+  remain (019_0/3/6 original leak, 019_7 A-exposed).
+- **E (ellipse scope)**: action deletes only inside <= 1.45x the bbox-inscribed ellipse
+  (the v23 signal geometry) — bbox corners are art, not soup. 019_0 11.2->7.7,
+  019_6 10.4->5.7, 019_7 3.2->0.6.
+- **S (saturation gate)**: soup is achromatic; leaked panel art is colored. cand must be
+  near-gray (max-min <= 40) or near-white (>= 240). Final config A+B+E+S: SUITE PASS —
+  002s fixed, clean sites <= 0.14% over, overlap sites 019_0/3/6 down to 3.6/2.5/1.9%
+  (3-6x better than v10-S; residual = achromatic bright art inside the overlap zone,
+  locally identical to soup — documented open, the strict <= 0.3% overlap bar NOT met).
+
+**Validation:** battery all 5 bars PASS (gold deltas vs v7 unchanged-to-better, fit
+-0.0061pp, failing-5 untouched, guard at adjudicated reference); suite gate PASS;
+chapter GT: 002 v12-QS over 0.591/under 10.058% — BETTER than v10-S on both axes
+(0.659/10.424): the corrected Q now nets positive at full-page scale; 001 0.719/9.964;
+035 0.216/32.06 (dark stratum, D not applied). **v12 = shipping candidate; v11 marked
+UNSAFE/deprecated (kept for history); v10 remains production default until the user
+confirms v12.** Open item: overlap-site achromatic-art residual (1.9-3.6% over on
+019_0/3/6).
+
 ## Methodology lessons (apply these before starting a new experiment)
 1. **One variable group per training run.** Every regression that was hard
    to attribute (v7, v9) involved bundling multiple simultaneous dataset

@@ -424,3 +424,14 @@ mechanism attempt is logged here with its measured result:
   segments across a spiky bbox before the clip flood; (c) re-validate everything at BOTH
   part and full-page scale + the diagnostic set as a regression suite. v11 default
   remains UNSAFE for full pages (use v10 or v11 steps='' equivalents until fixed).
+- **v26 fix round: `_protected_interiors_v2` (closed-contour ownership test) fixes the
+  v25 root cause; occlusion bridging + ellipse scope + saturation gate close most of the
+  leak class; v12 SHIPS as candidate (suite PASS, battery PASS incl. new full-page gate,
+  chapter GT better than v10-S on both axes); v11 DEPRECATED/UNSAFE (kept for history);
+  v10 stays production default until v12 is confirmed** (2026-08-09). Full config
+  comparison in logs/v26_suite_all.log: A alone fixes 002 (21.5->1.8% under) but exposes
+  3 previously-shielded action leaks; B alone fixes straight-line occlusions only; final
+  A+B+E+S: clean sites <= 0.14% over, overlap residual 1.9-3.6% on 019_0/3/6 (achromatic
+  bright art in the overlap zone — locally identical to soup; strict <= 0.3% bar unmet
+  there, documented open). Standing infra: `v26_fullpage_suite.py` (12-instance PSD
+  suite, required gate) + `v26_battery.py`.
