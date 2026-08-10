@@ -686,3 +686,33 @@ Module status: `src/classifiers/frame.py` ships as a page-scale LINE inventory
 validated against the local signal) for framework use. `classify_frames`' panel-rect
 grouping is NOT validated for standalone use (over-generative, see diagnostic above) —
 documented in the module. Commit 8.2.2.
+
+## Gen-8 phase 3: cloud-classifier regression baseline established (2026-08-10 18:37 EEST)
+
+Classifier identified: `style_analysis.extract_enclosed_holes` + `classify_and_measure`
+(the 5-family taxonomy). The user-reported defects map exactly to the documented record
+(notes/style_analysis_findings.md): (a) recall gap = limitation 4 (dark-scene flood-fill
+break, bounded not fixed) + limitation 2 residual; (b) frame-as-cloud FP = limitation 2
+(routing); (c) the "existing untested fix" = the Revision-2 pair (width-only frame
+routing + text-plausibility interior filter), shipped 2026-07-26 on visual spot-checks
+only. New suite: `src/classifiers/tests/cloud_suite.py` — 92 user-curated clauds crops
+(set A, padded-canvas harness documented in the module), the 12 spiky PSD instances
+(set B), 20 synthetic frame-only pages (set C). Coverage gaps stated in the module
+docstring (presence/family GT only, dark-scene coverage limited to what ch2 crops carry).
+
+**Baseline (current code, first measured numbers):**
+- Set A recall 68/92 (73.9%) — all 24 misses are "no candidate hole at all", not
+  filter rejections. Adjudication caveat: inspected misses include crop-TRUNCATED
+  outlines (open ink loop at the crop edge → no enclosed hole by construction), so
+  24 is an upper bound mixing harness artifacts with genuine detection gaps; per-crop
+  adjudication is phase-4 regular_cloud input, not assumed here.
+- Set B 12/12 (100%) — every spiky instance detected, all classified 'thorn'
+  (corroborates limitation 6's thorn/spiky boundary fuzz; detection solid, family fuzzy).
+- Set C: 4/20 frame-only pages produce bubble-family FPs (all 'rectangle' — panel
+  rects entering the bubble taxonomy). Defect (b) is real and now has a number.
+- Defect (c) verdict on this evidence: the Revision-2 text-plausibility fix holds on
+  the measured set — text-heavy boxes/bubbles detect fine; zero observed
+  rejected-by-filter misses. Not a full clearance (no labeled Revision-1 art-FP cases
+  in the suite), but the fix is no longer purely visually-verified.
+
+This table is the baseline phase 4's regular_cloud profile must beat. Commit 8.3.1.
