@@ -152,46 +152,15 @@ def pct(n: int, d: int) -> str:
     return f"{100.0 * n / d:.4f}%"
 
 
-def eval_checkpoint(model_path: Path, device: torch.device, label: str, chain_name: str,
-                     crf_weights: Path | None = None, sfx_weights: Path | None = None) -> dict:
+def eval_checkpoint(model_path: Path, device: torch.device, label: str, chain_name: str) -> dict:
     """Returns {chapter: {"raw": {...}, tag_name: {...}}} plus a pixel-weighted "aggregate"
-    key computed across all chapters for each of "raw" and tag_name.
-
-    `crf_weights` (attempt 8, 2026-08-05) / `sfx_weights` (2026-08-05, the already-proven SFX
-    instance-scoped refiner, `sfx_instance_pipeline.py`): both optional and orthogonal to
-    `chain_name` -- when given, wrap whichever chain was selected with an additional refine step
-    (not a new CHAINS enum value), exactly the postprocess(rgb, mask) -> mask generalization this
-    function was already built to support. Both may be combined."""
+    key computed across all chapters for each of "raw" and tag_name."""
     model, config = load_model(model_path, device)
     threshold = float(config.get("threshold", 0.5))
     gp = GuidanceParams(threshold_value=int(config.get("threshold_value", 30)),
                          morph_radius=int(config.get("morph_radius", 2)))
-    base_chain_fn = CHAINS[chain_name]
-
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    suffix = ""
-    steps = []
-    if crf_weights is not None:
-        from crf_instance_pipeline import apply_crf_refine
-        steps.append(lambda rgb, m: apply_crf_refine(rgb, m, crf_weights, device))
-        suffix += "+crf"
-    if sfx_weights is not None:
-        from sfx_instance_pipeline import apply_sfx_instance_refine, load_sfx_instance_model
-        sfx_model = load_sfx_instance_model(sfx_weights)
-        steps.append(lambda rgb, m: apply_sfx_instance_refine(rgb, m, sfx_model)[0])
-        suffix += "+sfx"
-
-    if steps:
-        def chain_fn(rgb, mask):
-            m = base_chain_fn(rgb, mask) if chain_name != "none" else mask
-            for step in steps:
-                m = step(rgb, m)
-            return m
-
-        tag_name = f"{chain_name}{suffix}"
-    else:
-        chain_fn = base_chain_fn
-        tag_name = chain_name
+    chain_fn = CHAINS[chain_name]
+    tag_name = chain_name
 
     results: dict[str, dict] = {}
     agg = {"raw": {"over": 0, "under": 0, "total": 0}, tag_name: {"over": 0, "under": 0, "total": 0}}
@@ -258,12 +227,6 @@ def main() -> None:
     ap.add_argument("--label", default=None, help="Label for the checkpoint in output (default: filename)")
     ap.add_argument("--chain", default="islands", choices=list(CHAINS),
                      help="postprocess chain to apply on top of the raw prediction")
-    ap.add_argument("--crf-weights", type=Path, default=None,
-                     help="attempt 8: optional CRFRefineNet checkpoint applied on top of "
-                          "--chain (orthogonal to --chain, not a new chain choice)")
-    ap.add_argument("--sfx-weights", type=Path, default=None,
-                     help="optional SFX instance-scoped refiner checkpoint (sfx_instance_pipeline.py) "
-                          "applied on top of --chain (and --crf-weights, if both given)")
     ap.add_argument("--device", default="auto")
     ap.add_argument("--baselines", action="store_true",
                      help="Run both standing reference configs (10.0-baseline+islands, "
@@ -281,8 +244,7 @@ def main() -> None:
         ap.error("--model is required unless --baselines is given")
 
     label = args.label or args.model.stem
-    eval_checkpoint(args.model, device, label, args.chain,
-                     crf_weights=args.crf_weights, sfx_weights=args.sfx_weights)
+    eval_checkpoint(args.model, device, label, args.chain)
 
 
 if __name__ == "__main__":
