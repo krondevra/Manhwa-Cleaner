@@ -505,3 +505,44 @@ mechanism attempt is logged here with its measured result:
   v10 remains production default; v12 remains the candidate pending the user's decision
   on whether the class-B residual (3 instances, 1.9-3.6% over-del, all better than v11)
   is acceptable to ship as-is.
+
+## Repository cleanup (2026-08-10 14:10 EEST)
+
+User-directed 10-point cleanup after both tracks concluded (ML: Recipe A/semantic floor
+2026-08-06; classical spiky-cloud: v27 2026-08-09). Commits 7.13.0-7.13.3.
+
+- **CascadePSP removed entirely** (checkpoints `data/models/cascadepsp-*` ~4.3GB deleted;
+  `probe/train/export_cascadepsp*`, `ensemble_refine`, `train/probe_refine_head` modules
+  and the `--cascadepsp-refine` ml_cleaner path removed). Reasons: results did not justify
+  keeping it, and its base weights' upstream training-data license provenance was never
+  auditable — incompatible with the MIT-clean policy. The evaluation record in
+  `docs/ml_strategy_history.md` remains authoritative.
+- **ToonOut probe removed** (`probe_toonout.py`, archive outputs): poor probe results.
+- **Dead-code sweep of `src/research/`**: all closed-negative-mission modules deleted
+  (halo refiner set, contour/Deep-Snake attempt 7, CRF attempt 8, instance bubble/SFX
+  pipelines, task_queue runner). Adopted mechanisms (reclaim_patchy_deletion,
+  d1_region_vote, eval_gen6_checkpoint, repair-frames family) and
+  rejected-but-doc-referenced modules (semantic_region_vote, panel_border_completion,
+  reclaim_black_backdrop) stay. Everything deleted is recoverable from git history.
+- **Failed-line disk reclaim**: `.tmp/checkpoints/{stage2,stage3,contour_deform_smoke,
+  crf_refine_*,instance_*_smoke}` and `.tmp/datasets/{stage3_sfx_2k,b2_bubbles_2k_prestage}`
+  deleted (~3.6GB; datasets regenerable from tracked generators). All stage1*/blackbg
+  checkpoints (incl. unadopted v4/v5) and datasets kept.
+- **`.tmp/archive` moved to repo-root `archive/`** (gitignored). All scattered `*.log`
+  files consolidated into `archive/logs/` with source-prefixed names; papers library at
+  `archive/articles/`; closed private cascadepsp notes at `archive/notes-closed/`;
+  superseded one-off scripts at `archive/scripts-manual/superseded/`.
+- **Spiky pipeline promoted to `src/spiky/` (git-tracked)**: replicate_pipeline v2-v12
+  import closure + band_classifier/leak_detector deps, v12 config wrappers, v26
+  battery/full-page suite, v27 reconcile, PSD ground-truth extractors (psd_extract,
+  psd_extract_gold). Data/caches stay in `.tmp/` (`scripts-manual/{gold_extracted,
+  suite_cache,spiky-clauds}`); stale pre-move data paths (`.tmp/minmax`,
+  `.tmp/spiky-clouds-diagnostics-psd` → `.tmp/debug/...`) fixed in the process.
+- **`.tmp/diagnostics` grouped into per-mission subfolders** (halo/, blackbg_darkpanel/,
+  recipe_a/, patchy/, sfx/, spiky/, border_probes/, misc/) + README index. Paths cited in
+  docs/notes before 2026-08-10 are the old flat ones — same files, now inside subfolders.
+- Stray `regression_summary.json` (root + .tmp) and `.tmp/task_queue/` deleted.
+- **Verification**: all src/spiky + kept research modules import/compile clean;
+  `ml_cleaner --help` and a production smoke run (10.0-baseline + --reclaim-islands)
+  pass; v26 battery + 12-instance suite PASS byte-identically from the new location;
+  psd_extract 0-mismatch on the 019_5 x-offset PSD. Disk: repo 81GB → 74GB.

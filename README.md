@@ -18,13 +18,15 @@ own. The project moved through:
    manual Photoshop workflow this project automates)
 4. **production tooling** — dataset prep, heuristic evaluation without ground
    truth, hard-case mining
-5. **learned refinement (experimental, opt-in)** — CascadePSP (Cheng et al.), a
-   class-agnostic refinement network, finetuned on Pepper & Carrot pairs to
-   correct SmallUNet's raw output. Best net pixel-error of any tested config
-   against real ground truth, but trades some gutter/SFX cleanup quality for
-   fixing over-deletion of real artwork. Available via `--cascadepsp-refine`
-   (`src/ml_cleaner.py process`/`process-folder`, needs `.venv-cascadepsp` —
-   see `docs/ml_strategy_history.md`) but not the production default.
+5. **classical spiky-cloud pipeline** (`src/spiky/`) — an OpenCV replication of
+   the manual Photoshop spiky-cloud cleaning workflow (`replicate_pipeline_v*`,
+   v10 production / v12 candidate) with its regression battery and PSD
+   ground-truth extractors.
+
+A learned CascadePSP refinement stage was evaluated and removed (2026-08-10):
+its base weights' upstream license provenance is incompatible with this
+project's MIT policy, and results did not justify keeping it — the full record
+stays in `docs/ml_strategy_history.md`.
 
 **Current production**: `data/models/10.0-baseline.pt` + `src/ml_cleaner.py
 process ... --reclaim-islands`.
@@ -41,6 +43,8 @@ src/            production pipeline scripts (longify, split, merge, cut_samples,
                 ml_cleaner, evaluate, compare, style_analysis, run_style_analysis)
 src/research/   probes, training scripts, and one-off eval/smoke tools not part
                 of the standard cleaning workflow (compare_models_video and others)
+src/spiky/      classical spiky-cloud pipeline (replicate_pipeline v2-v12 chain),
+                v26 regression battery/suite, PSD ground-truth extractors
 docs/           command reference (docs/readme.md), strategy history
                 (docs/ml_strategy_history.md)
 notes/          private planning/investigation notes (gitignored, not in the
@@ -87,11 +91,7 @@ the PepperNCarrotDataset repo's `src/tools/cut_dataset.py` before training.
 
 ## Checkpoints and releases
 Small checkpoints (SmallUNet, ~14MB each) are tracked directly in
-`data/models/`. Larger third-party-architecture checkpoints (e.g. the
-CascadePSP finetune above, ~260MB) exceed GitHub's 100MB per-file limit and
-are distributed as [GitHub Release](../../releases) assets instead — download
-and place under `data/models/` manually if needed;
-`data/models/cascadepsp-*` is gitignored for this reason.
+`data/models/`.
 
 ## License
 

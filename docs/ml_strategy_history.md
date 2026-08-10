@@ -3014,3 +3014,13 @@ confirms v12.** Open item: overlap-site achromatic-art residual (1.9-3.6% over o
     reproduce `run_gt()`'s exact band-and-margin construction (or run the real thing)
     when building a comparison crop — never approximate it with a tighter window "close
     enough" to the target region.**
+
+## Artifact removal note (2026-08-10)
+
+Repository cleanup (commits 7.13.0-7.13.3, see docs/decisions.md "Repository cleanup"):
+CascadePSP/ToonOut checkpoints and modules, closed-negative-mission research code
+(halo refiner, contour attempt 7, CRF attempt 8, instance bubble/SFX pipelines), and
+failed-line checkpoints/datasets were deleted; the spiky-cloud classical pipeline was
+promoted to git-tracked `src/spiky/`. File paths cited in entries above may therefore no
+longer exist on disk — this history text remains the authoritative record of what was
+tried and why, and deleted code is recoverable from git history at the cited commits.
