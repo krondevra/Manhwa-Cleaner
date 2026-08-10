@@ -662,3 +662,27 @@ The module itself stays: `classify_frames` (A3 configuration), `detect_lines` (A
 kept for the record), `detect_lines_morph`, `bridge_collinear`,
 `extrapolate_missing_sides` — a working page-scale frame-line/panel inventory for
 framework use regardless of the class-B outcome. Commit 8.2.1.
+
+## Gen-8 phase 2 CLOSED: honest negative on class-B via frame geometry (2026-08-10 18:33 EEST)
+
+Hypothesis family 2 (panel-RECT interiors as area barriers for the spiky action)
+died at its pre-attempt coverage diagnostic — no integration attempt was warranted:
+detected rect interiors cover 0.1%/0.0%/0.0% of the actual leaked (over-deleted) px at
+019_0/019_3/019_6, while containing 100%/23%/34% of the CORRECT deletions (791 rects
+from the greedy grouping over-cover background) — as a barrier it would block genuine
+deletion massively while missing the leak entirely. The leaked px lie in
+irregular/organic panel regions that produce neither line nor rectangle evidence.
+
+**Phase-2 verdict:** two independent classical-geometry hypothesis families (global
+line detection ×3 attempts; area/rect evidence, closed by diagnostic) cannot address
+the v27 class-B residual. Combined with v27's own three failed local attempts, class B
+(019_0/3/6, 1.9-3.6% over-deletion) is now flagged for the deferred GUI/manual track —
+per protocol, no third family without explicit user go-ahead. Existing v12 numbers
+unchanged (battery/suite untouched this phase — no pipeline modification was ever made;
+all measurement used cached masks + read-only probes).
+
+Module status: `src/classifiers/frame.py` ships as a page-scale LINE inventory
+(`detect_lines_morph` + `bridge_collinear`, deterministic, 0.4s/153k-row page,
+validated against the local signal) for framework use. `classify_frames`' panel-rect
+grouping is NOT validated for standalone use (over-generative, see diagnostic above) —
+documented in the module. Commit 8.2.2.

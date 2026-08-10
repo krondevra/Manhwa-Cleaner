@@ -21,6 +21,19 @@ are the v25-diagnosed bug class). Decision-boundary bias: when line evidence is
 ambiguous, prefer treating px as deletable background over protecting it -- a frame
 line is only asserted where the geometric evidence threshold is met.
 
+STATUS AFTER THE PHASE-2 ROUND (2026-08-10, see docs/decisions.md):
+- VALIDATED: `detect_lines_morph` + `bridge_collinear` (the A3 page-scale line
+  inventory -- deterministic, 0.4s on a 153k-row chapter, agrees with the window-local
+  signal everywhere it was checked).
+- NOT validated for standalone use: `classify_frames`' panel-rect grouping
+  (over-generative -- 791 rects on chapter 019, interiors cover large background areas;
+  measured covering up to 100% of correct deletions at the class-B sites). Use the line
+  inventory, not the rects, until the grouping gets its own validation round.
+- The class-B (019_0/3/6) closure goal itself ended as an HONEST NEGATIVE for both
+  classical-geometry families (lines x3 attempts, rects by coverage diagnostic: the
+  leaked px produce no line or rectangle evidence at any scale) -- that residual is
+  flagged for the GUI/manual track, not for further ladder rounds here.
+
 Constants deliberately reuse the validated classical thresholds: ink `<= FRAME_DARK`
 (gray 100) and minimum run length `MIN_LINE` (100 px) are the same values every
 frame-interacting mechanism since v10 has used (`_bridged_runs`, A' frame zone,
