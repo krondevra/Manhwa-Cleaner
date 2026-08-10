@@ -20,9 +20,7 @@ from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from replicate_pipeline_v7 import clean_page as v7
-from replicate_pipeline_v12 import clean_page as v8
-from replicate_pipeline_v8 import step_a_prime
+from pipeline import clean_page_v7 as v7, clean_page as v8, step_a_prime
 
 # Promoted from .tmp/scripts-manual (2026-08-10 cleanup): code is git-tracked here,
 # data stays in gitignored .tmp/ and archive/.
@@ -124,7 +122,7 @@ def main() -> None:
         print(f"  {k} ({names[k]}): {'PASS' if ok[k] else 'FAIL'}", flush=True)
     print("\n=== full-page suite (12-instance PSD set, v12 QS) ===", flush=True)
     from v26_fullpage_suite import run_suite
-    _, suite_ok = run_suite("v12_cfgABES", "QS", "v12ABES")
+    _, suite_ok = run_suite("ABES", "QS", "v12ABES")
     ok[6] = suite_ok
     print(f"OVERALL: {'PASS' if all(ok.values()) else 'FAIL'}", flush=True)
 

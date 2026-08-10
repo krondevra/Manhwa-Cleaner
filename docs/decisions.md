@@ -546,3 +546,20 @@ User-directed 10-point cleanup after both tracks concluded (ML: Recipe A/semanti
   `ml_cleaner --help` and a production smoke run (10.0-baseline + --reclaim-islands)
   pass; v26 battery + 12-instance suite PASS byte-identically from the new location;
   psd_extract 0-mismatch on the 019_5 x-offset PSD. Disk: repo 81GB → 74GB.
+
+## src/spiky consolidation (2026-08-10 14:45 EEST)
+
+Follow-up to the 7.13.2 promotion, per user direction: the per-version file chain
+(`replicate_pipeline_v2/5/6/7/8/9/10/11/12.py` + five `v12_cfg*.py` flag wrappers) is
+merged into a single `src/spiky/pipeline.py` — version history belongs in the git
+commits, not as parallel files. Sections keep their vN provenance headers; entry points:
+`clean_page` (v12 candidate, ABES defaults), `clean_page_v10` (production),
+`clean_page_v7` (battery white-track reference), `apply_config(letters)` (replaces the
+cfg wrapper files), `clean_spiky_region` (manual/GUI action). v26_fullpage_suite's
+importlib-by-module-name mechanism became config-letter based; cache keys unchanged.
+
+**Equivalence verified BEFORE deletion** (old chain vs pipeline.py, np.array_equal):
+v7 on gold parts 001-1/033-2 EQUAL; v12 ABES "QS" on full 002 and 019 EQUAL old-vs-new
+AND vs the pre-existing suite_cache masks; v10 "S" on full 019 EQUAL. Full v26 battery +
+12-instance suite re-run from the consolidated module: PASS, numbers identical.
+Commit 7.13.4.

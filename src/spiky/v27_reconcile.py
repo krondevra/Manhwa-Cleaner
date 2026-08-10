@@ -22,8 +22,7 @@ SP = HERE.parents[1] / ".tmp/diagnostics/v27_reconcile"
 SP.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(HERE))
 from v26_fullpage_suite import CACHE, DIAG, INSTANCES, PAGES
-from replicate_pipeline_v8 import _enclosed, G_TOL
-import v12_cfgABES as cfg
+from pipeline import _enclosed, G_TOL
 
 
 def fill_holes(mask: np.ndarray) -> np.ndarray:

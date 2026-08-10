@@ -1,23 +1,25 @@
 """Standing full-page regression suite over the 12-instance PSD diagnostic set.
 
-Infrastructure (plan v26 Part 1): given a pipeline module name + steps string, runs the
-FULL chapters 002 and 019 once each (masks cached in suite_cache/ keyed by config name),
-slices the 12 diagnostic crops and scores over%/under% vs the PSD-etalon composited
-alpha (<128 = delete; per the v25 019_5 anomaly, never decode layer.mask directly).
+Infrastructure (plan v26 Part 1): given a pipeline FIX-config letter string + steps
+string, runs the FULL chapters 002 and 019 once each (masks cached in suite_cache/ keyed
+by config name), slices the 12 diagnostic crops and scores over%/under% vs the
+PSD-etalon composited alpha (<128 = delete; per the v25 019_5 anomaly, never decode
+layer.mask directly).
 
 Bars (v26): clean sites (019_1/5/7/8/9) over <= 0.3%; defect-class instances must not be
 worse than the v10-S reference by > 0.3pp on either axis (and the fix rounds expect them
 to IMPROVE). Reference v10-S numbers are embedded from the v25 diagnosis table.
 
 Usage:
-  .venv/bin/python v26_fullpage_suite.py <module> <steps> <config_name>
+  .venv/bin/python src/spiky/v26_fullpage_suite.py <config_letters> <steps> <config_name>
 e.g.
-  .venv/bin/python v26_fullpage_suite.py replicate_pipeline_v10 S v10S
-Importable: run_suite(module_name, steps, config_name) -> list of row dicts.
+  .venv/bin/python src/spiky/v26_fullpage_suite.py ABES QS v12ABES
+(pass entry=clean_page_v10 style configs by editing run_suite's entry arg; the historical
+per-version modules were consolidated into pipeline.py, 2026-08-10)
+Importable: run_suite(config_letters, steps, config_name) -> (rows, ok).
 """
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
@@ -68,19 +70,20 @@ V10S_REF = {
 }
 
 
-def _page_mask(module_name: str, steps: str, config_name: str, ch: str) -> np.ndarray:
+def _page_mask(config_letters: str, steps: str, config_name: str, ch: str) -> np.ndarray:
     p = CACHE / f"{config_name}_{ch}.npy"
     if p.exists():
         return np.load(p)
-    mod = importlib.import_module(module_name)
+    import pipeline
+    pipeline.apply_config(config_letters)
     rgb = np.asarray(Image.open(PAGES[ch]).convert("RGB"))
-    d = mod.clean_page(rgb, steps=steps)
+    d = pipeline.clean_page(rgb, steps=steps)
     np.save(p, d)
     return d
 
 
-def run_suite(module_name: str, steps: str, config_name: str, verbose: bool = True):
-    masks = {ch: _page_mask(module_name, steps, config_name, ch) for ch in PAGES}
+def run_suite(config_letters: str, steps: str, config_name: str, verbose: bool = True):
+    masks = {ch: _page_mask(config_letters, steps, config_name, ch) for ch in PAGES}
     rows = []
     ok = True
     for name, ch, y0, _init in INSTANCES:
