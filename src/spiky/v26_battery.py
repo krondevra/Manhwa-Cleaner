@@ -30,7 +30,7 @@ GOLD = TMP / "scripts-manual/gold_extracted"
 SYN = ARCHIVE / "synth_pages"
 FIT_SRC = ARCHIVE / "005-1.png"
 FIT_GT = ARCHIVE / "005-1_cleaned.png"
-MERGED = TMP / "eval/merged"
+MERGED = TMP / "eval/merged"  # neutral symlink alias, see docs/decisions.md 2026-08-10
 
 V7_GOLD_WT = {"001-1": 3.7325, "001-2": 0.8217, "001-3": 1.4092, "002-1": 2.3663,
                "002-2": 2.3845, "002-3": 1.6605, "033-1": 6.7978,

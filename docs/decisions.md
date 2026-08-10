@@ -563,3 +563,14 @@ v7 on gold parts 001-1/033-2 EQUAL; v12 ABES "QS" on full 002 and 019 EQUAL old-
 AND vs the pre-existing suite_cache masks; v10 "S" on full 019 EQUAL. Full v26 battery +
 12-instance suite re-run from the consolidated module: PASS, numbers identical.
 Commit 7.13.4.
+
+## Eval-data path neutralization (2026-08-10 15:25 EEST)
+
+Post-audit cosmetic fix (the MIT audit itself found no violations): tracked src/spiky
+files no longer embed the eval manhwa's title in path strings. They now read through
+neutral local symlink aliases under gitignored `.tmp/eval/`:
+`002.png` -> `.tmp/debug/minmax/other/002.png`; `019.png` and `merged` -> the merged
+eval-chapter folder under `.tmp/saved/materials/Merged/`. Recreate with `ln -sfn` if
+`.tmp` is rebuilt. The unpushed commits 7.13.2-7.13.4 were history-rewritten to carry
+the neutral form too, so no pushable blob names the work. Battery re-verified PASS
+through the symlinks. Commit 7.13.5.

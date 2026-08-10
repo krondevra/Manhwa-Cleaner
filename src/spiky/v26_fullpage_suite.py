@@ -37,9 +37,12 @@ DIAG = TMP / "debug/spiky-clouds-diagnostics-psd"
 CACHE = TMP / "scripts-manual/suite_cache"
 CACHE.mkdir(parents=True, exist_ok=True)
 
+# .tmp/eval/ holds neutral symlink aliases into the local (gitignored) eval-chapter
+# data -- see docs/decisions.md 2026-08-10 for the mapping to recreate them.
+EVAL = TMP / "eval"
 PAGES = {
-    "002": str(TMP / "debug/minmax/other/002.png"),
-    "019": str(TMP / "eval/019.png"),
+    "002": str(EVAL / "002.png"),
+    "019": str(EVAL / "019.png"),
 }
 
 # (folder, chapter, crop y0, initial filename)
