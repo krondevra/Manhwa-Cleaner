@@ -59,10 +59,12 @@ CORNER_TOL = 14    # px: how close a horizontal and vertical end must be to join
 @dataclass
 class Line:
     """A maximal merged axis-aligned line. orient 'h': pos=y, span=(x0,x1);
-    orient 'v': pos=x, span=(y0,y1)."""
+    orient 'v': pos=x, span=(y0,y1). thick = measured stroke thickness in px (pos is
+    the stroke CENTER -- consumers matching edges must allow +-thick/2)."""
     orient: str
     pos: int
     span: tuple[int, int]
+    thick: int = 1
 
     @property
     def length(self) -> int:
@@ -195,11 +197,11 @@ def detect_lines_morph(page_gray: np.ndarray) -> tuple[list[Line], list[Line]]:
             if orient == "h":
                 if w < MIN_LINE:
                     continue
-                lines.append(Line("h", y + h // 2, (x, x + w)))
+                lines.append(Line("h", y + h // 2, (x, x + w), thick=h))
             else:
                 if h < MIN_LINE:
                     continue
-                lines.append(Line("v", x + w // 2, (y, y + h)))
+                lines.append(Line("v", x + w // 2, (y, y + h), thick=w))
         out[orient] = lines
     return out["h"], out["v"]
 
@@ -217,10 +219,11 @@ def bridge_collinear(lines: list[Line], max_gap: int = BRIDGE_GAP) -> list[Line]
                 if gap <= max_gap and ln.span[1] > m.span[1]:
                     if m.length >= MIN_LINE and ln.length >= MIN_LINE:
                         m.span = (m.span[0], ln.span[1])
+                        m.thick = max(m.thick, ln.thick)
                         joined = True
                         break
         if not joined:
-            merged.append(Line(ln.orient, ln.pos, ln.span))
+            merged.append(Line(ln.orient, ln.pos, ln.span, ln.thick))
     return merged
 
 

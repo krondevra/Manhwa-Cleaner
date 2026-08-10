@@ -729,3 +729,31 @@ number duplication). **Equivalence gate PASS**: `detect(page, PROFILE)` returns
 site lists IDENTICAL to `pipeline.find_spiky_sites` on full chapters 002 (10 sites)
 and 019 (27 sites). pipeline.py remains the production caller — re-pointing it at the
 profile is a separate explicit decision per the per-classifier merge rule. Commit 8.4.1.
+
+## Gen-8 phase 4 (part 2): regular_cloud profile adopted at FP 4->1, zero recall cost; sfx_glyph blocked on labeled data (2026-08-10 18:50 EEST)
+
+`src/classifiers/profiles/regular_cloud.py` — existing classifier as candidate
+generator + framework signals. Attempt ladder (full log in the module docstring, one
+variable each): A1 frame-line alignment, fixed 3px tolerance — counted failure
+(0 FP fixed; root cause: line pos = stroke center vs hole edge at stroke inner edge,
+19-38px offsets on thick synthetic strokes). A2 thickness-aware alignment
+(`Line.thick` added to the frame module) — SUCCESS, FP pages 4->2, recall preserved,
+counter reset. A3 stroke-thickness signal — counted failure (regress-elsewhere: FP
+2->1 but set A 68->62; ring measurement conflates enclosing stroke with adjacent
+art/dark-scene ink — all 7 false rejections were thorn/other, all true FPs
+'rectangle'). A4 class-scoped thickness (rectangle-only) — SUCCESS: **set C FP pages
+4 -> 1, sets A (68/92) and B (12/12) fully preserved.** Adopted profile =
+thickness-aware frame-line alignment + rectangle-scoped stroke-thickness gate.
+Residual: 1 FP page (000016, a page-edge box whose ring measurement is diluted at the
+canvas boundary) — documented, next single-variable candidate is edge-aware ring
+handling; ladder remains open (2 successes, counter at 0).
+
+`sfx_glyph` profile: BLOCKED, not attempted — no labeled SFX-glyph ground truth
+exists anywhere in the repo (the deleted find_sfx_instances work left only aggregate
+precision numbers; .tmp/diagnostics/sfx/ holds unlabeled candidate renders). Building
+a suite-less profile would fabricate confidence. CONCRETE ASK: a small user-curated
+SFX crop set (like the clauds-and-ui crops) unblocks it immediately.
+
+Battery bookend: full battery + 12-instance suite re-run at mission end — PASS,
+numbers identical to mission start (pipeline untouched since 8.1.2's byte-identical
+extraction; classifiers are additive modules). Commit 8.5.1.
