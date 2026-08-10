@@ -41,15 +41,27 @@ separately in the first place).
   `ml_strategy_history.md` "Generation 6 pivot").
 - **6**: full pivot to a self-synthesized training pipeline — no P&C
   composition tuning, no third-party pretrained weights of any kind. Starts
-  at `6.1.1`. Plan: `notes/synthetic_curriculum_plan.md`.
+  at `6.1.1`. Plan: `notes/synthetic_curriculum_plan.md`. Concluded at the
+  measured ~12.5% semantic floor (Recipe A, `6.9.0`-`6.9.2`); ends at `6.9.2`.
+- **7**: classical spiky-cloud replication track — the manual Photoshop
+  pipeline decoded and mechanized as deterministic OpenCV code (per-plan
+  rounds v12-v27), consolidated into `src/spiky/pipeline.py`, plus the
+  2026-08-10 repository cleanup. Runs `7.1.1`-`7.13.5`.
+- **8**: modular detector-framework architecture — classical rules/geometry
+  only (no ML by deliberate choice, not as a temporary constraint), existing
+  validated logic EXTRACTED into `src/classifiers/` modules rather than
+  rewritten; delete-background-over-preserve-frame bias at decision
+  boundaries. Starts at `8.1.1`, developed on the `testing` branch, merged
+  to `main` per-classifier only with explicit user confirmation.
 
-**Generation 5 is reserved and intentionally absent from `main`**: it is
-exclusively the `archive` branch's label for these same CascadePSP/ToonOut
-commits under their original numbers `5.1.1`-`5.7.12` (tip `130ad9f`,
-content-identical to `4.16.1`-`4.22.12` above) — preserved unchanged there
-while `main`'s copies were folded into generation 4 in the 2026-08-10
-consolidation (message + this section's own text renumbered; no code or
-checkpoint content touched).
+**Generation 5 is reserved and intentionally absent**: the CascadePSP/ToonOut
+commits originally numbered `5.1.1`-`5.7.12` were folded into generation 4 as
+`4.16.1`-`4.22.12` in the 2026-08-10 consolidation (messages + this section's
+own text renumbered; no code or checkpoint content touched). A local `archive`
+branch that had bookmarked the era under its original numbers was deleted the
+same day once confirmed to be a plain ancestor of `main` (zero unique commits)
+— the full history, content-identical, lives on `main`; the number 5 is simply
+never reused.
 
 ### 2026-07-23 history rewrite
 23 commits made between `3.48.1` and the CascadePSP work had never been
@@ -574,3 +586,28 @@ eval-chapter folder under `.tmp/saved/materials/Merged/`. Recreate with `ln -sfn
 `.tmp` is rebuilt. The unpushed commits 7.13.2-7.13.4 were history-rewritten to carry
 the neutral form too, so no pushable blob names the work. Battery re-verified PASS
 through the symlinks. Commit 7.13.5.
+
+## Generation 8 mission start: modular detector framework (2026-08-10 18:11 EEST)
+
+New parallel architecture effort on branch `testing` (normal branch off `main` @
+`a13c777`, shared history — verified `git merge-base --is-ancestor main testing`).
+Standing principles for the whole mission: classical rules/geometry only (no ML,
+including fallbacks — deliberate architectural choice); when uncertain, DELETE
+background over PRESERVE frame content (baked into decision boundaries); never train
+on real manhwa (eval against real chapters/gold PSDs fine); one variable per attempt,
+commit every attempt; classifiers live in `src/classifiers/`; per-classifier merge to
+`main` only with explicit user confirmation. Phases: 1 extract background classifier
+(mechanical, byte-identical), 2 geometric frame classifier (Hough + missing-side
+extrapolation, targets the v27 class-B occlusion residual 019_0/3/6), 3 regression
+suite for the existing cloud classifier, 4 detector framework with pluggable geometry
+profiles (spiky_cloud ported from v23 cascade, sfx_glyph new, regular_cloud from phase-3
+findings). Fallback protocol: 3 attempts → root-cause diagnosis → new hypothesis
+family → 3 more → honest negative, flag for GUI/manual track, move on.
+
+Setup also recorded here: `.gitignore` hardened with global `*.npy`/`*.npz`/`*.pth`
+(no tracked instances; `data/models/*.pt` stays tracked). Precondition executed before
+setup: `notes/` and `archive/` had vanished from disk (13:27-16:25 today, cause
+unknown, never git-tracked) — fully restored from timeshift snapshot
+`2026-08-10_13-27-45` with the day's reorg re-applied (CASCADEPSP/toonout deletions,
+log consolidation, superseded scripts, notes-closed); full battery re-run after
+restore: PASS with standing numbers.

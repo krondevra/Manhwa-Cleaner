@@ -40,3 +40,9 @@ out*.txt
 # Archived experiment artifacts (moved out of .tmp/ 2026-08-10): closed-mission outputs,
 # consolidated logs, papers library, closed private notes. Never git-tracked.
 /archive/
+# Binary experiment dumps must never land in git regardless of directory (gen-8
+# hardening, 2026-08-10). NOT *.pt: data/models/*.pt checkpoints are deliberately
+# tracked; .pth/.npy/.npz have no tracked instances and never should.
+*.npy
+*.npz
+*.pth
