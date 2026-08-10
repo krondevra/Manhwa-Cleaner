@@ -716,3 +716,16 @@ docstring (presence/family GT only, dark-scene coverage limited to what ch2 crop
   in the suite), but the fix is no longer purely visually-verified.
 
 This table is the baseline phase 4's regular_cloud profile must beat. Commit 8.3.1.
+
+## Gen-8 phase 4 (part 1): detector framework + spiky_cloud profile ported (2026-08-10 18:40 EEST)
+
+`src/classifiers/detector_framework.py`: one detection loop, pluggable Profile =
+candidate generator + independent geometric Signals, AND-voting (the v23-validated
+cascade structure), `detect(page, profile, explain=)` with per-signal value reporting
+(v20/v23 trade-visibility standard). `src/classifiers/profiles/spiky_cloud.py`: the
+v23 cascade RESTRUCTURED into that shape — candidate generation verbatim, both signals
+via the same `_rim_runs_and_glyphs`, every constant IMPORTED from pipeline.py (no
+number duplication). **Equivalence gate PASS**: `detect(page, PROFILE)` returns
+site lists IDENTICAL to `pipeline.find_spiky_sites` on full chapters 002 (10 sites)
+and 019 (27 sites). pipeline.py remains the production caller — re-pointing it at the
+profile is a separate explicit decision per the per-classifier merge rule. Commit 8.4.1.
