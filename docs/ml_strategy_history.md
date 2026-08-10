@@ -3024,3 +3024,39 @@ failed-line checkpoints/datasets were deleted; the spiky-cloud classical pipelin
 promoted to git-tracked `src/spiky/`. File paths cited in entries above may therefore no
 longer exist on disk — this history text remains the authoritative record of what was
 tried and why, and deleted code is recoverable from git history at the cited commits.
+
+## Generation 8: modular detector framework — mission record (2026-08-10, branch `testing`)
+
+Classical rules/geometry only (no ML by design). Full per-commit log in
+docs/decisions.md gen-8 entries; condensed record here.
+
+- **8.1.1 setup**: `testing` branch off main @ a13c777; .gitignore binary hardening;
+  gen 6/7/8 boundaries documented. Precondition: notes/ + archive/ restored from
+  timeshift after an unexplained disk loss; battery re-verified PASS before any work.
+- **8.1.2 background classifier**: `src/classifiers/background.py` — enclosed/flood/
+  protected_interiors(+v2) moved verbatim out of the spiky pipeline; equivalence gate
+  EQUAL (v7 gold, v10-S + v12-ABES full pages vs pre-change masks); battery identical.
+- **8.2.x frame classifier**: `src/classifiers/frame.py`. Line-detection family:
+  Hough FAILED (sampling dilution on 153k-row dense-ink pages); extrapolation FAILED
+  (starved); page-wide morphological inventory + occlusion bridging works as a
+  detector (1583 h-lines, 0.4s) but supplied ZERO new barrier rows at the v27 class-B
+  sites — measured conclusion: **class-B residual is NOT frame-line occlusion**.
+  Second family (panel-rect area barriers) killed by coverage diagnostic (rects cover
+  0.0-0.1% of leaked px, up to 100% of correct deletions). Class B (019_0/3/6)
+  flagged for the GUI/manual track after 2 independent geometry families + v27's 3
+  local attempts. Module ships as a validated line inventory; rect grouping
+  explicitly unvalidated.
+- **8.3.1 cloud-classifier baseline**: first regression suite for
+  `style_analysis.extract_enclosed_holes` (92 user clauds crops / 12 spiky PSDs / 20
+  synth frame pages): recall 73.9% (with crop-truncation caveat), spiky 12/12
+  (all 'thorn'), frame-as-cloud FPs on 4/20 pages; the Revision-2 text-plausibility
+  fix holds on measured data for the first time.
+- **8.4.1 framework + spiky_cloud**: Profile = candidates + AND-voted signals
+  (v23 cascade structure); spiky_cloud ported with constants imported from pipeline;
+  site lists IDENTICAL to find_spiky_sites on both full chapters.
+- **8.5.1 regular_cloud adopted**: 4-attempt ladder (2 failures with measured root
+  causes, 2 successes) → FP pages 4->1 at zero recall cost. sfx_glyph BLOCKED on
+  labeled ground truth (needs a user-curated SFX crop set).
+
+Battery + 12-instance suite: PASS at mission start, after extraction, and at mission
+end — production and candidate pipelines untouched throughout.
