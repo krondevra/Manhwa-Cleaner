@@ -629,3 +629,36 @@ Verified byte-identical (this was a refactor; any diff = bug): np.array_equal fr
 post-extraction vs pre-change references — v7 on gold 001-1 (pre-saved mask), v12-ABES
 "QS" on full 019 AND 002 vs suite_cache, v10-S on full 019 vs suite_cache: all EQUAL.
 Full battery + 12-instance suite: PASS, numbers identical. Commit 8.1.2.
+
+## Gen-8 phase 2: frame classifier — hypothesis family 1 (line detection) 3 failures, root cause identified (2026-08-10 18:32 EEST)
+
+`src/classifiers/frame.py` built with the full attempt ladder; measured against the
+class-B leak sites (019_0/3/6) on full chapter 019:
+- **A1 (probabilistic Hough + rectangular grouping): FAIL.** Page-wide h=202/v=6154
+  lines, but 0 h-lines inside the 019_0/019_3 windows — Hough misses even lines the
+  plain erode/dilate morphology finds (accumulator/sampling dilution on a 153k-row page
+  dense with art ink). Evidence: local bridged-run rows exist at 1714-1716/1850-1851
+  (019_0) with no corresponding Hough line at any coverage.
+- **A2 (missing-side extrapolation on A1's inventory): FAIL.** 100 panels grouped
+  page-wide, but extrapolation cannot conjure sides whose horizontals A1 never
+  detected: 0 new in-window frame rows at 019_0/019_3; the single row at 019_6 (32024)
+  duplicates local knowledge.
+- **A3 (page-wide morphological long-run inventory + collinear occlusion bridging,
+  both-flanks >= 100px evidence rule): FAIL on the success criterion.** The inventory
+  itself is good (1583 bridged h-lines in 0.4s, incl. a full-width line at 1715
+  spanning 019_0's window) — but it supplies ZERO barrier rows the window-local Fix B
+  signal doesn't already have, at all three sites.
+
+**Root cause (family-level):** the v27 class-B residual is NOT frame-line occlusion.
+Every frame line that exists at those sites is already found locally; the leakage
+traverses regions genuinely devoid of line evidence at any scale (irregular/organic
+panel boundaries). The phase premise ("occlusion needs global extrapolation") is
+measured false for these instances. Per the fallback protocol: line-detection family
+STOPPED at 3; second hypothesis family = AREA evidence — use the detected panel
+RECTANGLES (the classifier's grouping output) as interior barriers for the spiky
+action's scope, pending a coverage diagnostic (do detected rects cover the leaked px?).
+
+The module itself stays: `classify_frames` (A3 configuration), `detect_lines` (A1,
+kept for the record), `detect_lines_morph`, `bridge_collinear`,
+`extrapolate_missing_sides` — a working page-scale frame-line/panel inventory for
+framework use regardless of the class-B outcome. Commit 8.2.1.
