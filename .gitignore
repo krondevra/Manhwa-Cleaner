@@ -37,3 +37,6 @@ out*.txt
 # Private planning/investigation notes -- deliberately not part of the public MIT repo.
 # Backed up only by whatever practice exists outside git (see notes/README or project docs).
 /notes/
+# Archived experiment artifacts (moved out of .tmp/ 2026-08-10): closed-mission outputs,
+# consolidated logs, papers library, closed private notes. Never git-tracked.
+/archive/
