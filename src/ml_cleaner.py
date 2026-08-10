@@ -212,15 +212,13 @@ def resolve_chapter_input(value: str | Path, chapters_dir: Path = DEFAULT_CHAPTE
     return path
 
 
-def model_version_prefix(model_path: Path, islands: bool = False, frames: bool = False,
-                          cascadepsp: bool = False) -> str:
+def model_version_prefix(model_path: Path, islands: bool = False, frames: bool = False) -> str:
     """e.g. data/models/3.0.pt -> "v3.0-", so output filenames show which
     checkpoint produced them (075_result.png -> v3.0-075_result.png).
-    With islands=True (--reclaim-islands), frames=True (--repair-frames), and/or
-    cascadepsp=True (--cascadepsp-refine), inserts "-islands-"/"-frames-"/
-    "-cascadepsp-"/merged combinations so the postprocessing configurations never
-    collide on disk. All active flags together merge into ONE hyphenated segment
-    ("-islandsframescascadepsp-", not "-islands-frames-cascadepsp-") because
+    With islands=True (--reclaim-islands) and/or frames=True (--repair-frames),
+    inserts "-islands-"/"-frames-"/merged combinations so the postprocessing
+    configurations never collide on disk. All active flags together merge into
+    ONE hyphenated segment ("-islandsframes-", not "-islands-frames-") because
     compare_models_video.py's version-discovery regex only supports a single
     suffix segment."""
     version = model_path.stem
@@ -229,7 +227,6 @@ def model_version_prefix(model_path: Path, islands: bool = False, frames: bool =
     suffix = (
         f"{'islands' if islands else ''}"
         f"{'frames' if frames else ''}"
-        f"{'cascadepsp' if cascadepsp else ''}"
     )
     return f"{version}-{suffix}-" if suffix else f"{version}-"
 
@@ -315,8 +312,8 @@ def choose_device(name: str) -> torch.device:
     if device.type == "cuda":
         # ROCm/MIOpen BatchNorm codegen bug on this hardware (gfx1151 iGPU) --
         # miopenStatusUnknownError / "cannot compile inline asm" on some BatchNorm2d
-        # configurations. Established workaround this session (train_refine_head.py,
-        # probe_toonout.py, cascadepsp_finetune work): disable the cuDNN/MIOpen backend
+        # configurations. Established workaround (2026-07 finetune experiments, see
+        # docs/ml_strategy_history.md): disable the cuDNN/MIOpen backend
         # entirely. No-op on NVIDIA CUDA, but this project only ever runs on this one
         # ROCm iGPU, so applying it unconditionally for any "cuda" device is correct
         # here rather than over-engineering a vendor check.
@@ -1278,8 +1275,8 @@ def train_command(args: argparse.Namespace) -> None:
             log(f"saved best model: {model_path}")
 
         if args.save_every_epoch:
-            # Opt-in, off by default -- exact no-op unless requested. Same fix already
-            # applied to train_cascadepsp_pc.py (commit 5.7.1): saving only the
+            # Opt-in, off by default -- exact no-op unless requested. Same fix as
+            # commit 4.22.1's finetune trainer: saving only the
             # best-val checkpoint means every intermediate epoch is lost, and this
             # project has since found (Phase B checkpoint-sweep, ml_strategy_history.md)
             # that identical seed+config does not reproduce identical trained weights on
@@ -1415,13 +1412,10 @@ def synthesize_coarse_mask_perturbation(
     hole_radius_range: tuple[int, int] = (4, 24),
 ) -> np.ndarray:
     """Corrupt a real ground-truth keep-mask (True=content, False=background) to look
-    like a plausible coarse-model mistake -- own from-scratch implementation of the same
-    idea CascadePSP's own training uses to teach a refinement stage without needing real
-    coarse-model output for every training example (see
-    data/CascadePSP/util/boundary_modification.py's modify_boundary, read and understood
-    during the CascadePSP finetune work -- this reimplements the underlying algorithm
-    idea from scratch, not their code, for the self-contained RefineHead training in
-    .claude/plans/snazzy-cuddling-creek.md).
+    like a plausible coarse-model mistake -- own from-scratch implementation of the
+    boundary-perturbation idea used to train refinement stages without needing real
+    coarse-model output for every training example (idea from the CascadePSP paper,
+    Cheng et al.; reimplemented from scratch, no third-party code).
 
     Applies, in random combination: (1) a random erode/dilate to simulate boundary
     imprecision (the clauds defect's actual shape), (2) a small number of random
@@ -1978,159 +1972,6 @@ def inject_bubble_interior_texture(
     return out
 
 
-_halo_refiner_cache: dict[tuple[str, str], object] = {}
-
-
-def apply_halo_refine(
-    rgb: np.ndarray,
-    delete_mask: np.ndarray,
-    weights_path: Path,
-    device: torch.device,
-    frame_darkness: int = 40,
-    min_bubble_area: float = 2000,
-) -> np.ndarray:
-    """Halo fix, 5th mechanism (.claude/plans/snazzy-cuddling-creek.md): apply the small,
-    from-scratch, trunk-independent HaloRefinerNet (src/halo_refiner.py) to every detected
-    bubble/cloud contour's crop, pasting the corrected result back into the full mask.
-
-    Bubble detection reuses `_find_bubble_interior_holes` (the same flood-fill-from-corner
-    technique `close_bubble_halo` itself uses on the source RGB, not the predicted mask --
-    same "trusted geometric boundary independent of mask topology" principle). If no contour
-    is found anywhere, this is a no-op, matching `close_bubble_halo`'s own graceful behavior
-    when detection fails.
-
-    Lazily imports halo_refiner (which itself imports from this module) to avoid a circular
-    import at module load time."""
-    from halo_refiner import HaloRefinerNet, CROP
-
-    cache_key = (str(weights_path), str(device))
-    model = _halo_refiner_cache.get(cache_key)
-    if model is None:
-        checkpoint = torch.load(str(weights_path), map_location=device, weights_only=False)
-        config = checkpoint["config"]
-        model = HaloRefinerNet(in_channels=config["in_channels"], base=config["base_channels"]).to(device)
-        model.load_state_dict(checkpoint["state_dict"])
-        model.eval()
-        _halo_refiner_cache[cache_key] = model
-
-    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    holes = _find_bubble_interior_holes(gray, frame_darkness, min_bubble_area)
-    if not holes:
-        return delete_mask.copy()
-
-    h, w = delete_mask.shape
-    out = delete_mask.copy()
-    for hole in holes:
-        contour = hole["contour"]
-        x, y, cw, ch = cv2.boundingRect(contour)
-        cx, cy = x + cw // 2, y + ch // 2
-        x0 = max(0, min(cx - CROP // 2, max(0, w - CROP)))
-        y0 = max(0, min(cy - CROP // 2, max(0, h - CROP)))
-        x1, y1 = min(w, x0 + CROP), min(h, y0 + CROP)
-
-        arr_crop, mask_crop, _ = crop_with_padding(rgb, out, x0, y0, CROP)
-        rgb_f = arr_crop.astype(np.float32) / 255.0
-        mask_f = mask_crop.astype(np.float32)[None, :, :]
-        model_input = np.concatenate([rgb_f.transpose(2, 0, 1), mask_f], axis=0)
-
-        with torch.no_grad():
-            tensor = torch.from_numpy(model_input).unsqueeze(0).to(device)
-            logits = model(tensor)
-            pred = (torch.sigmoid(logits) > 0.5).squeeze(0).squeeze(0).cpu().numpy()
-
-        # Only paste the VALID (non-padded) portion of the crop back -- crop_with_padding
-        # always returns a full CROP x CROP array, zero/white-padded past the image edge.
-        valid_h, valid_w = y1 - y0, x1 - x0
-        out[y0:y1, x0:x1] = pred[:valid_h, :valid_w].astype(bool)
-
-    return out
-
-
-_cascadepsp_refiner_cache: dict[tuple[str, str], object] = {}
-
-# Must match src/probe_cascadepsp.py's GT_BAND/MARGIN exactly -- every quality
-# number this project has ever measured for CascadePSP refinement (the whole
-# CascadePSP section of docs/ml_strategy_history.md) was computed by processing
-# GT_BAND-row bands with MARGIN px of context padding on each side, never a
-# single whole-image pass. CascadePSP's cascade uses global downsampled context
-# that depends on input size (see docs/ml_strategy_history.md methodology
-# lesson #10) -- feeding it a full manhwa-length strip (tens of thousands of
-# rows) at once is a different, unvalidated regime and was found in practice to
-# incorrectly restore large blank gutter regions to "keep". Band it the same
-# way every GT evaluation did.
-CASCADEPSP_BAND = 4000
-CASCADEPSP_MARGIN = 300
-
-
-def apply_cascadepsp_refine(
-    rgb: np.ndarray,
-    delete_mask: np.ndarray,
-    weights_path: Path,
-    device: torch.device,
-    fast: bool,
-) -> np.ndarray:
-    """Refine a delete mask with CascadePSP (Cheng et al.), a class-agnostic
-    boundary-refinement network -- applied LAST, after all other postprocessing
-    (reclaim-islands, protect-borders, repair-frames), matching how every quality
-    number in docs/ml_strategy_history.md's CascadePSP sections was measured.
-
-    Processes the image in CASCADEPSP_BAND-row bands with CASCADEPSP_MARGIN px
-    of context on each side -- NOT a single whole-image call -- reproducing
-    src/probe_cascadepsp.py::run_gt()'s exact banding so real-page behavior
-    matches every number this project has already validated. Do not change
-    this to a single whole-image refine() call without re-validating against
-    the GT harness first; see docs/ml_strategy_history.md methodology lesson
-    #10 for why context size changes CascadePSP's actual decisions, not just
-    precision.
-
-    Requires the 'segmentation_refinement' package, installed only in
-    .venv-cascadepsp (not the default .venv this script normally runs under) --
-    imported lazily here so the default pipeline path never depends on it.
-
-    The constructed Refiner is cached module-wide by (weights_path, device) so
-    repeated calls (e.g. from process_folder_command's per-file loop) reuse the
-    same loaded model instead of reloading a ~270MB checkpoint per file."""
-    try:
-        import segmentation_refinement as sr
-    except ImportError as exc:
-        raise SystemExit(
-            "--cascadepsp-refine requires the 'segmentation_refinement' package, "
-            "installed in .venv-cascadepsp, not the default .venv -- rerun with "
-            "'.venv-cascadepsp/bin/python src/ml_cleaner.py ...'"
-        ) from exc
-
-    cache_key = (str(weights_path), str(device))
-    refiner = _cascadepsp_refiner_cache.get(cache_key)
-    if refiner is None:
-        refiner = sr.Refiner(device=str(device))
-        # train_cascadepsp_pc.py saves checkpoints with a 'module.' prefix
-        # (matching nn.DataParallel), the same convention Refiner itself
-        # expects and strips on its own stock-weights load path -- reuse that
-        # exact stripping logic so our finetuned checkpoints load the same way.
-        state = torch.load(str(weights_path), map_location="cpu", weights_only=False)
-        stripped = {(k[7:] if k.startswith("module.") else k): v for k, v in state.items()}
-        refiner.model.load_state_dict(stripped)
-        refiner.model.eval()
-        _cascadepsp_refiner_cache[cache_key] = refiner
-
-    H = rgb.shape[0]
-    refined = delete_mask.copy()
-    n_bands = (H + CASCADEPSP_BAND - 1) // CASCADEPSP_BAND
-    for b in range(n_bands):
-        y = b * CASCADEPSP_BAND
-        y0 = max(0, y - CASCADEPSP_MARGIN)
-        y1 = min(H, y + CASCADEPSP_BAND + CASCADEPSP_MARGIN)
-        band_rgb = rgb[y0:y1]
-        band_delete = delete_mask[y0:y1]
-        keep = np.where(band_delete, 0, 255).astype(np.uint8)
-        bgr = band_rgb[:, :, ::-1].copy()
-        soft = refiner.refine(bgr, keep, fast=fast, L=900)
-        band_refined = soft <= 127
-        ly, ly2 = y - y0, min(H, y + CASCADEPSP_BAND) - y0
-        refined[y:y + (ly2 - ly)] = band_refined[ly:ly2]
-    return refined
-
-
 def process_command(args: argparse.Namespace) -> None:
     if getattr(args, "recipe", None) == "stage1-v9":
         # Mission plan v9 Recipe A preset -- see --recipe help text for the evidence trail.
@@ -2156,8 +1997,7 @@ def process_command(args: argparse.Namespace) -> None:
     input_path = resolve_chapter_input(args.input, DEFAULT_CHAPTERS_LONG_DIR)
     output_path = resolve_chapter_output(
         input_path, args.output, DEFAULT_CHAPTERS_RESULTS_DIR,
-        model_version_prefix(model_path, islands=args.reclaim_islands, frames=args.repair_frames,
-                              cascadepsp=args.cascadepsp_refine),
+        model_version_prefix(model_path, islands=args.reclaim_islands, frames=args.repair_frames),
     )
 
     if not input_path.exists():
@@ -2214,27 +2054,6 @@ def process_command(args: argparse.Namespace) -> None:
             args.halo_min_bubble_area, args.halo_min_background_area,
         )
 
-    if args.halo_refine:
-        log(f"halo refine (weights={args.halo_refine_weights})")
-        delete_mask = apply_halo_refine(
-            rgb, delete_mask, expand_path(args.halo_refine_weights), device,
-        )
-
-    if args.sfx_instance_refine:
-        log(f"sfx instance refine (weights={args.sfx_instance_weights})")
-        import sys as _sys
-        _sys.path.insert(0, str(Path(__file__).resolve().parent / "research"))
-        from sfx_instance_pipeline import apply_sfx_instance_refine, load_sfx_instance_model
-        sfx_model = load_sfx_instance_model(expand_path(args.sfx_instance_weights))
-        delete_mask, _sfx_info = apply_sfx_instance_refine(rgb, delete_mask, sfx_model)
-        log(f"sfx instance refine: {len(_sfx_info)} candidate(s) processed")
-
-    if args.cascadepsp_refine:
-        log(f"cascadepsp refine (weights={args.cascadepsp_weights}, fast={args.cascadepsp_fast})")
-        delete_mask = apply_cascadepsp_refine(
-            rgb, delete_mask, expand_path(args.cascadepsp_weights), device, args.cascadepsp_fast,
-        )
-
     save_rgba(output_path, rgb, delete_mask)
     log(f"saved: {output_path}")
 
@@ -2288,8 +2107,7 @@ def process_folder_command(args: argparse.Namespace) -> None:
         morph_radius=int(config.get("morph_radius", args.morph_radius)),
     )
 
-    prefix = model_version_prefix(model_path, islands=args.reclaim_islands, frames=args.repair_frames,
-                                   cascadepsp=args.cascadepsp_refine)
+    prefix = model_version_prefix(model_path, islands=args.reclaim_islands, frames=args.repair_frames)
 
     log(f"model: {model_path}")
     log(f"input: {input_dir}")
@@ -2333,16 +2151,6 @@ def process_folder_command(args: argparse.Namespace) -> None:
             delete_mask = close_bubble_halo(
                 rgb, delete_mask, args.halo_ring_width, args.halo_frame_darkness,
                 args.halo_min_bubble_area, args.halo_min_background_area,
-            )
-
-        if args.halo_refine:
-            delete_mask = apply_halo_refine(
-                rgb, delete_mask, expand_path(args.halo_refine_weights), device,
-            )
-
-        if args.cascadepsp_refine:
-            delete_mask = apply_cascadepsp_refine(
-                rgb, delete_mask, expand_path(args.cascadepsp_weights), device, args.cascadepsp_fast,
             )
 
         save_rgba(output_path, rgb, delete_mask)
@@ -2427,7 +2235,7 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
         "delete->keep in an enclosed interior); never touches real nearby content (not "
         "part of any delete component, so it fails the reach test for free) or small "
         "delete speckles (below --halo-min-background-area). Cheap, no retraining; runs "
-        "after --repair-frames, before --cascadepsp-refine.",
+        "after --repair-frames, as the last postprocessing step.",
     )
     parser.add_argument(
         "--halo-ring-width", type=int, default=24,
@@ -2484,77 +2292,6 @@ def add_inference_args(parser: argparse.ArgumentParser) -> None:
         "assembled by offline ablation on the manual-clean chapters (aggregate total error "
         "14.23%% -> 12.50%% on blackbg_v3; SFX instance refine measured and excluded, +1.5pp "
         "regression). Individual step flags may still be added on top.",
-    )
-    parser.add_argument(
-        "--halo-refine",
-        action="store_true",
-        help="Refine the delete mask with the small, from-scratch, trunk-independent "
-        "HaloRefinerNet (src/halo_refiner.py) -- the 5th halo mechanism attempted "
-        "(.claude/plans/snazzy-cuddling-creek.md), applied after --close-bubble-halo. "
-        "Opt-in (off by default). Detects bubble/cloud contours the same way "
-        "--close-bubble-halo does (ink-outline flood-fill, independent of the predicted "
-        "mask), crops a small region around each, and runs the refiner -- unlike "
-        "--cascadepsp-refine, this needs no separate venv (a small native torch model in "
-        "the default environment).",
-    )
-    parser.add_argument(
-        "--halo-refine-weights",
-        default=".tmp/halo_refiner_smoke/refiner.pt",
-        help="HaloRefinerNet checkpoint for --halo-refine.",
-    )
-    parser.add_argument(
-        "--sfx-instance-refine",
-        action="store_true",
-        help="Refine the delete mask with TinyInstanceNet (src/research/instance_sfx_net.py), "
-        "the instance-aware architecture pivot's SFX result (notes/instance_aware_pivot_"
-        "2026-08-03.md, -08-04.md). Opt-in (off by default) -- a research/proof-of-mechanism "
-        "checkpoint, NOT regression-tested against the full skin/steam/bubble battery "
-        "production checkpoints get. Detects SFX-like isolated ink clusters via "
-        "find_sfx_instances() (own ink-stroke heuristic, roughly one-in-five raw SFX-specific precision "
-        "on a real stratified sample, but verified safe: every measured false-positive "
-        "candidate's region was already predicted correctly by the dense checkpoint, so "
-        "misdetection is a no-op there, not a regression -- see the notes above for the full "
-        "measurement). Real-instance results are honest, not uniformly positive: of 6 tracked "
-        "real instances, 2 improved, 2 slightly regressed, 2 unchanged vs. the dense baseline "
-        "(all 6 still under the 0.30 ceiling). Applied after --close-bubble-halo/--halo-refine.",
-    )
-    parser.add_argument(
-        "--sfx-instance-weights",
-        default=".tmp/checkpoints/instance_sfx_smoke/instance_sfx_smoke_with_bg_weighted.pt",
-        help="TinyInstanceNet checkpoint for --sfx-instance-refine.",
-    )
-    parser.add_argument(
-        "--cascadepsp-refine",
-        action="store_true",
-        help="Refine the delete mask with CascadePSP (Cheng et al.), a class-agnostic "
-        "boundary-refinement network finetuned on Pepper & Carrot, applied LAST after "
-        "all other postprocessing above. Opt-in (off by default) -- a real but modest "
-        "quality profile with its own tradeoffs, not a strict improvement over "
-        "10.0-baseline + --reclaim-islands alone (see docs/ml_strategy_history.md, "
-        "search 'CascadePSP'). Requires 'segmentation_refinement', installed only in "
-        ".venv-cascadepsp -- rerun with that interpreter if this flag is used. Much "
-        "slower than the rest of this pipeline even with --cascadepsp-fast (default "
-        "on): budget a few minutes/chapter, not the instant turnaround of the rest.",
-    )
-    parser.add_argument(
-        "--cascadepsp-weights",
-        default="data/models/cascadepsp-sfx-pilot.step400.pth",
-        help="CascadePSP checkpoint for --cascadepsp-refine. Default is this project's "
-        "best-evaluated checkpoint as of 2026-07-25 (see "
-        "notes/cascadepsp_production_integration_plan.md for why this one, not "
-        "the marginally-higher-aggregate-score step600 checkpoint -- step600 has a "
-        "real, visually-confirmed small-content-deletion defect this one doesn't).",
-    )
-    parser.add_argument(
-        "--cascadepsp-fast", action="store_true", default=True,
-        help="CascadePSP fast mode (single global refinement pass instead of the full "
-        "local+global cascade) -- ~17x faster, small (~0.17pp measured) quality cost. "
-        "On by default; pass --no-cascadepsp-fast for full-precision mode.",
-    )
-    parser.add_argument(
-        "--no-cascadepsp-fast", dest="cascadepsp_fast", action="store_false",
-        help="Use CascadePSP's full local+global cascade instead of fast mode -- best "
-        "measured quality, but ~40-55min/chapter instead of ~2-3min.",
     )
     parser.add_argument(
         "--sdt-fusion", action="store_true",
