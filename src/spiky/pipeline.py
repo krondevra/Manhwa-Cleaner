@@ -40,6 +40,17 @@ from ml_cleaner import repair_frame_interiors
 from leak_detector import detect_leaks
 from band_classifier import find_bands, load_band_net, classify_bands
 
+# Background/reachability primitives extracted to src/classifiers/background.py
+# (gen-8 phase 1, byte-identical move -- see that module's provenance docstring).
+# Underscore aliases keep every historical call site below unchanged.
+from classifiers.background import (
+    PROT_DOMINANCE,
+    enclosed as _enclosed,
+    flood as _flood,
+    protected_interiors as _protected_interiors,
+    protected_interiors_v2 as _protected_interiors_v2,
+)
+
 
 # ============================================================================
 # v2 -- PSD-calibrated white-mask builder (plan v12 steps 4-5).
@@ -166,24 +177,8 @@ OUTER_DEL_FRAC = 0.35
 INK_T = 64
 
 
-def _protected_interiors(gray: np.ndarray) -> np.ndarray:
-    """Closed-frame interiors (repair_frame_interiors-style): holes >= 10k px fully enclosed
-    by near-black strokes. Pockets inside these are NEVER reclaimed (3(d) negative guard)."""
-    stroke = (gray <= 40).astype(np.uint8)
-    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    stroke = cv2.morphologyEx(stroke, cv2.MORPH_CLOSE, k)
-    H, W = gray.shape
-    padded = np.zeros((H + 2, W + 2), dtype=np.uint8)
-    padded[1:-1, 1:-1] = stroke
-    ff = np.zeros((H + 4, W + 4), dtype=np.uint8)
-    cv2.floodFill(padded, ff, (0, 0), 1)
-    holes = (padded[1:-1, 1:-1] == 0).astype(np.uint8)
-    num, labels, stats, _ = cv2.connectedComponentsWithStats(holes, connectivity=4)
-    protected = np.zeros((H, W), dtype=bool)
-    for lbl in range(1, num):
-        if stats[lbl, cv2.CC_STAT_AREA] >= 10000:
-            protected[labels == lbl] = True
-    return protected
+# _protected_interiors (v6): moved to classifiers.background.protected_interiors,
+# imported above under its historical name.
 
 
 def step_a_border_residue(gray: np.ndarray, delete: np.ndarray) -> np.ndarray:
@@ -426,23 +421,8 @@ G_INT_MIN = 3000  # minimal interior area for a gap-sealed enclosure
 G_INT_MAX = 500000
 
 
-def _enclosed(passable: np.ndarray) -> np.ndarray:
-    """Regions of the passable map NOT connected to the image border (exact, 4-conn)."""
-    num, lab = cv2.connectedComponents(passable.astype(np.uint8), connectivity=4)
-    border = np.zeros(num, dtype=bool)
-    for edge in (lab[0, :], lab[-1, :], lab[:, 0], lab[:, -1]):
-        border[np.unique(edge)] = True
-    border[0] = True
-    return ~border[lab] & passable
-
-
-def _flood(seed: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """Union of 4-connected components of mask that contain any seed px (exact)."""
-    num, lab = cv2.connectedComponents(mask.astype(np.uint8), connectivity=4)
-    hit = np.zeros(num, dtype=bool)
-    hit[np.unique(lab[seed & mask])] = True
-    hit[0] = False
-    return hit[lab]
+# _enclosed / _flood (v8): moved to classifiers.background.enclosed/flood,
+# imported above under their historical names.
 
 
 def clean_spiky_region(rgb: np.ndarray, delete: np.ndarray,
@@ -797,7 +777,7 @@ FIX_R = False  # v27 attempt B3: ring-distance gate -- cand must be within RING_
                # ray ink (chamfer distance), replacing unbounded flood reach as the
                # deep-leak stopper. off by default pending measurement.
 
-PROT_DOMINANCE = 0.90
+# PROT_DOMINANCE moved with _protected_interiors_v2 to classifiers.background.
 ELLIPSE_MAX = 1.45
 SAT_MAX = 40
 RING_PX = 80
@@ -814,39 +794,8 @@ def apply_config(letters: str) -> None:
     FIX_R = "R" in letters
 
 
-def _protected_interiors_v2(gray: np.ndarray) -> np.ndarray:
-    """Fix A: closed-contour ownership test on top of the v6 hole detection."""
-    stroke_closed = (gray <= 40).astype(np.uint8)
-    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    stroke_closed = cv2.morphologyEx(stroke_closed, cv2.MORPH_CLOSE, k)
-    H, W = gray.shape
-    padded = np.zeros((H + 2, W + 2), dtype=np.uint8)
-    padded[1:-1, 1:-1] = stroke_closed
-    ff = np.zeros((H + 4, W + 4), dtype=np.uint8)
-    cv2.floodFill(padded, ff, (0, 0), 1)
-    holes = (padded[1:-1, 1:-1] == 0).astype(np.uint8)
-    num, labels, stats, _ = cv2.connectedComponentsWithStats(holes, connectivity=4)
-
-    raw_stroke = (gray <= 40).astype(np.uint8)  # UN-closed: no cross-frame bridging
-    snum, slab = cv2.connectedComponents(raw_stroke, connectivity=8)
-    k3 = np.ones((3, 3), np.uint8)
-    protected = np.zeros((H, W), dtype=bool)
-    for lbl in range(1, num):
-        if stats[lbl, cv2.CC_STAT_AREA] < 10000:
-            continue
-        x, y, w, h = (int(stats[lbl, j]) for j in range(4))
-        x0, y0 = max(0, x - 4), max(0, y - 4)
-        x1, y1 = min(W, x + w + 4), min(H, y + h + 4)
-        hole = (labels[y0:y1, x0:x1] == lbl).astype(np.uint8)
-        ring = (cv2.dilate(hole, k3, iterations=3) > 0) & (hole == 0)
-        touched = slab[y0:y1, x0:x1][ring]
-        touched = touched[touched != 0]
-        if len(touched) == 0:
-            continue
-        counts = np.bincount(touched)
-        if counts.max() / len(touched) >= PROT_DOMINANCE:
-            protected[labels == lbl] = True
-    return protected
+# _protected_interiors_v2 (Fix A): moved to classifiers.background.protected_interiors_v2,
+# imported above under its historical name.
 
 
 def _prot(gray: np.ndarray) -> np.ndarray:

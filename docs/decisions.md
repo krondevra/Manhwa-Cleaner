@@ -611,3 +611,21 @@ unknown, never git-tracked) — fully restored from timeshift snapshot
 `2026-08-10_13-27-45` with the day's reorg re-applied (CASCADEPSP/toonout deletions,
 log consolidation, superseded scripts, notes-closed); full battery re-run after
 restore: PASS with standing numbers.
+
+## Gen-8 phase 1: background classifier extracted (2026-08-10 18:26 EEST)
+
+`src/classifiers/background.py` now holds the validated connected-component/
+reachability primitives, MOVED verbatim from `src/spiky/pipeline.py` (no reimplementation):
+`enclosed`/`flood` (v8 exact 4-conn primitives), `protected_interiors` (v6 hole
+detection), `protected_interiors_v2` (v12 Fix A closed-contour ownership test, the
+full-page-context fix) + `PROT_DOMINANCE`, plus a new `classify_background(page_rgb)`
+convenience entry (protection scoped to ownership-passing interiors only —
+delete-over-preserve bias documented in the module). pipeline.py imports them under
+the historical underscore names (zero call-site changes); v27_reconcile re-pointed to
+the module directly. Siblings deliberately not merged: `ml_cleaner.
+repair_frame_interiors`, `style_analysis.extract_enclosed_holes` (different lineages).
+
+Verified byte-identical (this was a refactor; any diff = bug): np.array_equal fresh
+post-extraction vs pre-change references — v7 on gold 001-1 (pre-saved mask), v12-ABES
+"QS" on full 019 AND 002 vs suite_cache, v10-S on full 019 vs suite_cache: all EQUAL.
+Full battery + 12-instance suite: PASS, numbers identical. Commit 8.1.2.

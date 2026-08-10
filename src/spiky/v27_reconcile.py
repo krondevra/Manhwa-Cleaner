@@ -21,8 +21,10 @@ HERE = Path(__file__).resolve().parent
 SP = HERE.parents[1] / ".tmp/diagnostics/v27_reconcile"
 SP.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parents[1] / "src"))
 from v26_fullpage_suite import CACHE, DIAG, INSTANCES, PAGES
-from pipeline import _enclosed, G_TOL
+from classifiers.background import enclosed as _enclosed
+from pipeline import G_TOL
 
 
 def fill_holes(mask: np.ndarray) -> np.ndarray:
