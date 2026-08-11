@@ -3094,3 +3094,30 @@ Open residuals: 004_4-class borders merged into dark art (inventory cannot see
 them); sealed-gutter-pocket vs bubble separation (wall-material analysis, future
 ladder); chapter-scale per-panel banding = phase-2's rect-grouping open problem.
 Battery + 12-instance suite: PASS before and after, bookends identical.
+
+## Gen-8 sfx.py residuals round: priority reversal applied, 004(4) resolved, residual 2 measured as non-issue (2026-08-11, commits 8.9.1-8.9.2)
+
+User priority change: over-delete preferred to under-delete, under-keep preferred
+to over-keep -- applied to ambiguous background resolution ONLY; the
+zero-frame-content-loss guard stayed hard and passed (0 px) after every attempt.
+Dark-background domain paused and measured to be a non-issue in this test set
+(GT-deleted background 99.4-100% light on every ref); eval reports white-only and
+total denominators.
+
+- **8.9.1 A1 border extrapolation**: a frame-band axis with ONE border-quality
+  line extrapolates to the farthest inventory far-edge on the panel side (the
+  merged-into-art border ends where the art-mass entry ends; predicted 772 vs
+  annotated 771 on 004(4)). Over-keep 34.06 -> 0.53% white-only at 20 px
+  over-delete; other 5 refs bit-identical.
+- **8.9.2 residual 2**: measured per-pocket -- every pocket >= 3000 px in all 6
+  refs is 100% GT-kept; the sealed-pocket population died with 8.8.1's POCKET_MIN
+  raise. B1 flip = error relocation at ~500:1 (honest negative under any
+  priority); B2 wall-material test misfires on a border-overlapping real bubble
+  (honest negative in current data). C1 rescue seed-fraction gate adopted:
+  aggregate FP-delete 4097 -> 3465 px AND FN-delete 30647 -> 26828 px, both
+  improved.
+
+End state, white-only per file (FP-delete / FN-delete %): 004 0.19/1.02,
+004(1) 0.01/0.38, 004(2) 0.16/1.42, 004(3) 0.21/1.16, 004(4) 0.00/0.53,
+005 0.08/0.46. Total disagreement across the 6 refs: 195k -> 30k px this round.
+Battery + suite PASS, identical to the standing bookend.
