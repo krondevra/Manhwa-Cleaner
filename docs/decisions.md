@@ -1106,3 +1106,48 @@ CHAPTER ADVERSARIAL: every in-panel deleted px lies inside a spiky site --
 semantics (thorn fringe deleted, protected text-bubble interiors kept); A1
 region and damage-class regions identical to the panel-aware round. Commit
 8.12.1.
+
+## Diagnostic round: white-rectangle instances in composed chapter output -- source-material artifact, NO data loss, single shared mechanism (2026-08-11 20:53 EEST)
+
+User review of 004's clean_chapter_full output found solid white rectangles
+where content was expected. Diagnosis (diagnostic-only; NO code changes):
+
+**Render purity proven first**: kept px in the red preview are byte-identical
+to the source across BOTH chapters (0 mismatches) -- no compositing/blanking
+bug exists and the 8.7.2-style stale-cache hypothesis is excluded for this
+path. Source content is NOT lost anywhere; the white boxes are white IN THE
+SOURCE.
+
+**Verified instances** (kept white islands >= 5000 px with deleted
+surroundings): 19 in chapter 004, 18 in chapter 002 -- pixel-identical shapes
+at a constant ~165-row offset across the two chapters (e.g. 213x150/area
+31950 in both; the 337x188 box at 004 y=77836 / 002 y=78011; the 689x88 strip).
+These are RECURRING TEMPLATE elements of the release: the translation group
+whited out the original-language caption boxes in the recurring recap/intro
+segments and placed the Russian text nearby. The boxes are invisible in the
+source (white on white, faint outline) and become conspicuous only when the
+surrounding gutter is deleted.
+
+**Keep attribution, uniform across all instances tested**: each box is kept by
+a regular_cloud detection classified 'thorn' -- the faint irregular outline
+reads as a thorn-family enclosed hole; the profile accepts it (thorn is not
+rectangle-class, so the stroke-thickness gate auto-passes) and
+clean_chapter_full's rc keep covers the box. Pocket-keep does NOT fire
+(pocket_cover 0.00 -- the outlines are too faint to seal at G>=33). The boxes
+were therefore DELETED in the panel-aware-only round (8.11.2) and became kept
+when regular_cloud was wired in (8.12.1).
+
+**Verdict**: single shared root cause; present in both chapters; zero data
+loss (a display-conspicuousness effect over a pre-existing source blank).
+
+**Proposal (NOT implemented, user's call)**: under the delete-bias priority,
+filter regular_cloud keeps whose region interior contains essentially no ink
+(e.g. < 1% px with G < 100): an empty hole protects nothing worth keeping;
+real bubbles contain text and are unaffected. One variable, measurable on the
+6 refs + both chapters. Until decided, the boxes render as kept white --
+cosmetic, recoverable, safe direction.
+
+Observed in passing, out of this diagnosis' scope: a few thin caption-glyph
+fragments in gutters show partial tinting (sfx keep granularity on tiny
+components) -- separate item, and UI-card handling remains the known deferred
+gap. Commit: docs-only (this entry); no code changed.
