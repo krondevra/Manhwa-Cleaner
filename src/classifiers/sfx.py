@@ -73,6 +73,14 @@ BORDER_THICK = 20      # border-quality line: stroke thickness cap (corpus media
 BORDER_SPAN_FRAC = 0.4  # ... and span at least this fraction of the page dimension
 EDGE_MARGIN = 3        # lines within this of the canvas edge are crop artifacts
 
+# 8.11.2 instrumentation: counts of safety-guard no-ops (defense-in-depth layer;
+# on the panel-aware clean_chapter path these are expected to stay near zero --
+# every firing there indicates either a genuine edge case or a segmentation miss
+# and gets diagnosed). Reset externally; incremented at the guard return sites.
+GUARD_STATS = {"zero_line": 0, "blank_evidence": 0, "inversion": 0}
+DENSE_INK = 0.15   # 8.11.2: borderless segment ink density at or above this =
+                   # full-bleed art island, kept wholesale in clean_chapter
+
 
 def _border_lines(rgb: np.ndarray):
     """Returns (hb, vb, h_all, v_all): border-quality lines plus the full bridged
@@ -132,14 +140,27 @@ def frame_keep_mask(rgb: np.ndarray, lines=None) -> np.ndarray:
     return keep
 
 
-def clean_sfx_region(rgb: np.ndarray, bubble_mode: str = "all") -> np.ndarray:
+def clean_sfx_region(rgb: np.ndarray, bubble_mode: str = "all",
+                     keep_mask: np.ndarray | None = None) -> np.ndarray:
     """Returns the delete mask (True = delete) for one page/crop.
 
     bubble_mode: 'all' = every pocket >= POCKET_MIN kept (8.8.1 behavior);
     'none' = pockets default to DELETE (the B1 flipped-default measurement);
     'wall' = keep only pockets whose enclosure wall is free-standing ink, not
-    inventory lines / canvas edge (B2 wall-material test)."""
+    inventory lines / canvas edge (B2 wall-material test).
+
+    keep_mask (8.11.2): a precomputed frame-keep (e.g. panel_segmentation
+    extents from clean_chapter). When given, the window-local band derivation
+    AND its three reactive guards are bypassed -- the caller's segmentation
+    knowledge supersedes re-derivation (measured unit-level failures without
+    this: A1 unit bands shorter than the true content extent, x-band collapse
+    from single v-lines, pseudo-partial furniture lines). None = standalone
+    behavior, unchanged."""
     H, W = rgb.shape[:2]
+    if keep_mask is not None:
+        white1 = rgb[..., 1] >= CUT_AGGR
+        keep = keep_mask
+        return _delete_with_keeps(rgb, white1, keep, bubble_mode)
     # ZERO-BORDER-LINE SAFETY GUARD (8.10.1): a window with no border-quality line
     # on EITHER axis has zero protective context -- pass-1 would classify colored
     # full-bleed art as deletable background (measured: ~32% of a pure-art window
@@ -152,6 +173,7 @@ def clean_sfx_region(rgb: np.ndarray, bubble_mode: str = "all") -> np.ndarray:
     lines = _border_lines(rgb)
     hb, vb = lines[0], lines[1]
     if len(hb) + len(vb) == 0:
+        GUARD_STATS["zero_line"] += 1
         return np.zeros((H, W), bool)
     white1 = rgb[..., 1] >= CUT_AGGR
     keep = frame_keep_mask(rgb, lines=lines)
@@ -170,6 +192,7 @@ def clean_sfx_region(rgb: np.ndarray, bubble_mode: str = "all") -> np.ndarray:
         g = rgb[..., 1] if rgb.ndim == 3 else rgb
         out_blank = float((g[outside] >= BLANK_G).mean())
         if out_blank < BLANK_MIN:
+            GUARD_STATS["blank_evidence"] += 1
             return np.zeros((H, W), bool)
         # BAND-INVERSION GUARD (8.10.1 attempt 3): when a window shows two panels
         # cut at its edges, the only in-window border lines are the panels' facing
@@ -181,8 +204,15 @@ def clean_sfx_region(rgb: np.ndarray, bubble_mode: str = "all") -> np.ndarray:
         if keep.any():
             in_blank = float((g[keep] >= BLANK_G).mean())
             if in_blank > out_blank:
+                GUARD_STATS["inversion"] += 1
                 return np.zeros((H, W), bool)
 
+    return _delete_with_keeps(rgb, white1, keep, bubble_mode)
+
+
+def _delete_with_keeps(rgb, white1, keep, bubble_mode):
+    """SFX + bubble keeps and the final delete formula, given a frame keep."""
+    H, W = rgb.shape[:2]
     # --- SFX keeps: profile detections, pass-2 rescue inside the region, expand ---
     ink1 = ~white1
     sfx_keep = np.zeros((H, W), bool)
@@ -271,3 +301,49 @@ def _pocket_wall_frac(pocket, barrier_win, geom) -> float:
 
 
 _K3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+
+
+def clean_chapter(rgb: np.ndarray, verbose: bool = False):
+    """Panel-aware chapter driver (8.11.2): processes a whole chapter strip by
+    REAL panel boundaries instead of fixed-height windows -- the architectural
+    fix for the cut-panel damage classes the 8.10.1 guards reacted to.
+
+    Units come from `panel_segmentation.units_for_processing` (gutter-midpoint
+    cuts). The frame keep is DRIVEN BY SEGMENTATION, not re-derived per unit
+    (attempt B1 -- measured unit-level re-derivation failures: A1 unit bands
+    shorter than the true content extent, x-band collapse from single v-lines,
+    pseudo-partial furniture lines): keep = all panel/partial rects, plus
+    borderless segments whose ink density >= DENSE_INK (full-bleed art islands,
+    kept wholesale -- the keep-all answer for content with no panel structure).
+    Sparse borderless segments (floating gutter glyphs/bubbles) and gutters get
+    gutter treatment: pass-1 delete minus the SFX/bubble keeps. Units whose rows
+    are entirely kept are skipped wholesale. The 8.10.1 reactive guards are
+    bypassed on this path (superseded by segmentation knowledge) but remain for
+    standalone clean_sfx_region use.
+
+    Returns (delete_mask, stats)."""
+    from classifiers.panel_segmentation import (segment_chapter,
+                                                units_for_processing)
+    H, W = rgb.shape[:2]
+    segs = segment_chapter(rgb)
+    units = units_for_processing(segs, H)
+    g = rgb[..., 1]
+    keep_all = np.zeros((H, W), bool)
+    for s in segs:
+        if s.kind in ("panel", "partial"):
+            keep_all[s.y0:s.y1, s.x0:s.x1] = True
+        elif s.kind == "borderless":
+            ink = float((g[s.y0:s.y1] < 100).mean())
+            if ink >= DENSE_INK:
+                keep_all[s.y0:s.y1] = True
+    delete = np.zeros((H, W), bool)
+    stats = {"units": len(units), "processed": 0, "skipped_kept": 0}
+    for y0, y1, kinds in units:
+        if keep_all[y0:y1].all():
+            stats["skipped_kept"] += 1
+            continue
+        delete[y0:y1] = clean_sfx_region(rgb[y0:y1], keep_mask=keep_all[y0:y1])
+        stats["processed"] += 1
+    if verbose:
+        print(f"clean_chapter: {stats}")
+    return delete, stats

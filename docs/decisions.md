@@ -1036,3 +1036,43 @@ chapters 002/004: 73/71 processing units (gutter-midpoint cuts, panels never cut
 mid-body by construction), segmentation maps rendered for review. Chapter-scale
 border-quality criteria documented: v-line span is ABSOLUTE (panel-height
 scaled), not chapter-fraction (the recurring scale lesson). Commit 8.11.1.
+
+## Gen-8 panel-aware windowing shipped: chapter adversarial 0 px, seams 0, guards silent (2026-08-11 20:04 EEST)
+
+`clean_chapter(rgb)` in sfx.py -- the architectural replacement for fixed-height
+windowing. Part-2 ladder:
+
+- First wiring (units processed through clean_sfx_region's own band derivation):
+  COUNTED FAILURE, measured -- chapter adversarial found 387k/493k deleted px
+  inside panel/partial interiors. Three root causes diagnosed: (1) pseudo-partial
+  segments from furniture-edge lines with content on BOTH sides (a real border
+  has a blank side: measured 0.94-1.00 vs 0.16-0.23); (2) unit-level A1 bands
+  shorter than the true content extent (art rows without 101px dark runs
+  contribute no inventory entries); (3) x-band collapse from single v-lines.
+  Additionally the 8.10.1 guards, evaluated at unit scope, are DILUTED by the
+  unit's legitimate gutter halves (only 5 firings/chapter; damage passed).
+- B1 SEGMENTATION-DRIVEN KEEP: clean_sfx_region accepts a precomputed keep_mask
+  (None = standalone behavior, unchanged -- 6-ref suite verified BIT-IDENTICAL);
+  clean_chapter builds the keep from segmentation directly: panel/partial rects
+  + DENSE borderless segments (ink >= 0.15 = full-bleed art islands, kept
+  wholesale); sparse borderless (floating glyphs/bubbles) and gutters get gutter
+  treatment (pass-1 delete minus SFX/bubble keeps). Head/tail pure-gutter slices
+  included after a measured seam check caught them unprocessed.
+
+RESULT (chapters 002/004): **chapter-scale adversarial = 0 deleted px inside any
+panel/partial interior** (was 387k/493k on the first wiring); **seam
+discontinuities at unit cuts = 0**; deletion coverage 37.7%/37.3% (vs 4.1%/3.6%
+in the guard-era chapter run -- the previously guard-suppressed legitimate gutter
+is now actually cleaned); ~18 s/chapter. Damage-region verification: y37100
+kept wholesale as identified dense-borderless; y51300's panels processed WHOLE
+with the inter-panel gutter cleaned; the 177k-px pseudo-partial room scene
+(y21891) untouched.
+
+GUARD-REDUNDANCY VERDICT (measured): on the panel-aware path the three 8.10.1
+guards are BYPASSED by design (segmentation knowledge supersedes re-derivation;
+firings = 0 by construction) -- and the first-wiring measurement showed they are
+NOT a sufficient safety net at unit scope anyway (gutter dilution). They remain
+active for standalone clean_sfx_region use (defense-in-depth on arbitrary
+crops). The root cause (fixed windows cutting panels) is REMOVED, not mitigated:
+units are cut at gutter midpoints, panels are whole by construction, and the
+keep comes from validated whole-chapter segmentation. Commit 8.11.2.

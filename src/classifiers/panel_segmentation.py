@@ -299,8 +299,10 @@ def units_for_processing(segs: list[Segment], H: int):
     for c0, c1 in zip(cuts[:-1], cuts[1:]):
         kinds = [s.kind for s in segs
                  if s.kind != "gutter" and s.y0 < c1 and s.y1 > c0]
-        if not kinds:
-            continue  # pure-gutter slice (chapter head/tail): nothing to process
+        # pure-gutter slices (chapter head/tail) are included with empty kinds:
+        # consumers give them plain gutter treatment (measured otherwise: the
+        # strip's head/tail gutters stay uncleaned, a visible seam at the first
+        # and last cut)
         units.append((c0, c1, kinds))
     return units
 
