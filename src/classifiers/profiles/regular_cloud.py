@@ -61,7 +61,11 @@ BUBBLE_FAMILY = {"oval", "cloud", "spiky", "thorn", "rectangle", "other"}
 ALIGN_TOL = 3        # px: bbox side to detected-line distance counted as coincident
 ALIGN_MAX = 0.6      # reject when >= this fraction of a side's length lies on a line
 
+# caches pin each page via _page_refs: id() values are only unique among LIVE
+# objects, so without the pin a freed page's recycled id could serve stale lines /
+# class labels to a new array (hazard measured in the sfx_glyph eval loop, 8.7.1).
 _line_cache: dict[int, tuple[list, list]] = {}
+_page_refs: dict[int, np.ndarray] = {}
 
 
 def _page_lines(page: np.ndarray):
@@ -69,6 +73,9 @@ def _page_lines(page: np.ndarray):
     if key not in _line_cache:
         if len(_line_cache) > 8:
             _line_cache.clear()
+            _cls_cache.clear()
+            _page_refs.clear()
+        _page_refs.setdefault(key, page)
         if page.ndim == 3:
             f = page.astype(np.float32)
             gray = np.round((f.max(axis=2) + f.min(axis=2)) / 2.0).astype(np.uint8)
@@ -87,6 +94,16 @@ def _candidates(page: np.ndarray) -> list[Region]:
     out: list[Region] = []
     if len(_cls_cache) > 8192:
         _cls_cache.clear()
+    # purge entries left by a previous (freed) page whose id was recycled
+    if id(page) not in _page_refs:
+        if len(_page_refs) > 8:
+            _line_cache.clear()
+            _cls_cache.clear()
+            _page_refs.clear()
+        stale = [k for k in _cls_cache if k[0] == id(page)]
+        for k in stale:
+            del _cls_cache[k]
+        _page_refs[id(page)] = page
     for s in extract_enclosed_holes(rgb):
         if s["class"] not in BUBBLE_FAMILY:
             continue

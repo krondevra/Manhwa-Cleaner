@@ -61,8 +61,12 @@ def _candidates(rgb: np.ndarray) -> list[Region]:
 
 
 # _rim_runs_and_glyphs computes both signals in one pass; cache per (id(page), region)
-# so the two Signal wrappers don't recompute it.
+# so the two Signal wrappers don't recompute it. _page_refs pins each cached page:
+# id() values are only unique among LIVE objects, so without the pin a freed page's
+# recycled id could serve stale measurements to a new array (hazard measured in the
+# sfx_glyph eval loop, 8.7.1).
 _cache: dict[tuple[int, Region], tuple[int, int]] = {}
+_page_refs: dict[int, np.ndarray] = {}
 
 
 def _measure(rgb: np.ndarray, region: Region) -> tuple[int, int]:
@@ -70,6 +74,8 @@ def _measure(rgb: np.ndarray, region: Region) -> tuple[int, int]:
     if key not in _cache:
         if len(_cache) > 4096:
             _cache.clear()
+            _page_refs.clear()
+        _page_refs.setdefault(id(rgb), rgb)
         _cache[key] = _rim_runs_and_glyphs(rgb, *region)
     return _cache[key]
 

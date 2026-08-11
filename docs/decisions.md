@@ -832,3 +832,24 @@ array's recycled id could serve a stale context (measured: 004_4 evaluated with
 another file's lines). sfx_glyph now holds the page reference; the same latent hazard
 exists in spiky_cloud/regular_cloud caches -- fix + gate re-verification queued as a
 separate commit. Commit 8.7.1.
+
+## Gen-8 integrity fix: id-recycle cache hazard in spiky_cloud/regular_cloud; 8.5.1 set-A number corrected 68 -> 67 (2026-08-11 16:04 EEST)
+
+The stale-context hazard found during the sfx_glyph eval (8.7.1) also lived in the
+sibling profiles: caches keyed by id(page) without holding a reference to the page,
+so a freed array's recycled id could serve another page's lines/classes/measurements.
+Both fixed (page pinned while cached; regular_cloud additionally purges recycled-id
+class entries).
+
+Gates re-run after the fix:
+- spiky_cloud equivalence: detect == pipeline.find_spiky_sites, IDENTICAL on 002
+  (10 sites) and 019 (27 sites) -- the 8.4.1 result stands.
+- regular_cloud suite: B 12/12 and C 1/20 (000016) unchanged; **set A corrects
+  68/92 -> 67/92**. The one delta (ch3/clauds/007.png) is a crop whose only
+  bubble-family shape is a 7x198 px 'other'-class sliver with frame_align=1.00 --
+  a line-hugging artifact, not the crop's actual cloud. Its 8.5.1 "hit" was the
+  stale-cache bug masking a legitimate alignment rejection; the corrected number is
+  the true profile behavior and the lost hit was spurious to begin with. The 8.5.1
+  adoption verdict (C 4->1, recall preserved) stands with A=67 as the honest
+  baseline-parity figure (baseline's own 68 included the same spurious sliver).
+Commit 8.7.2.
