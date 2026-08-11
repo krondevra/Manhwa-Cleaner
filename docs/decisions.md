@@ -1151,3 +1151,39 @@ Observed in passing, out of this diagnosis' scope: a few thin caption-glyph
 fragments in gutters show partial tinting (sfx keep granularity on tiny
 components) -- separate item, and UI-card handling remains the known deferred
 gap. Commit: docs-only (this entry); no code changed.
+
+## 8.12.4: empty-hole filter for regular_cloud keeps -- interior-ink metric, 57 empty keeps removed, real bubbles untouched (2026-08-11 21:07 EEST)
+
+The a280337-proposed fix, applied at the COMPOSITION point in clean_chapter_full
+(not in the profile: whether an empty detected hole deserves a keep is
+orchestration policy under the delete bias; the profile's 8.5.1 behavior and
+suite numbers stay untouched and its detections remain available).
+
+Measured correction to the proposed "<1% region ink" spec: the flagship empty
+box measures 3.3% ink REGION-level purely from its own 2 px outline -- region-
+level density cannot separate. The shipped metric is INTERIOR ink: region inset
+by max(6 px, 12% of the smaller dimension), then fraction of px with G < 100;
+threshold RC_KEEP_INK_MIN = 0.01 (attempt 1).
+
+Threshold verification (attempt-2 measurement, then STOP): the full interior-
+ink distribution over all 80 rc regions in both chapters is bimodal at the 1%
+bar -- empties at 0.0000-0.0004, everything at 1.40%+ verified VISUALLY to
+contain real content (bubbles "ЭТО ГЁН...", "ДА...", the translated caption box
+"1. БОЛЬ И...", art edges). Raising the threshold would strip real bubbles at
+1.9-2.5% -- measured regress-elsewhere, NOT adopted; 1% stands.
+
+RESULTS: 25 (004) + 32 (002) = 57 empty keeps filtered; rc kept px 691k -> 185k
+(004) and 860k -> 225k (002); kept-white-island count 19 -> 4 (004), 18 -> 3
+(002). The remaining islands are a DIFFERENT population than the complaint:
+their keeps contain real translated text (the flagship box's rc region includes
+the caption text at its bottom edge -- interior ink 1.40% is genuinely text;
+others are dense-borderless segment keeps holding captions) -- correctly kept
+under the architecture; visually they still read as partially-empty boxes
+because the source is partially empty there.
+
+Guards: chapter adversarial 0 in-panel deleted px outside spiky sites (both
+chapters); 6-ref suite BIT-IDENTICAL with hard guard 0 px (this change cannot
+touch that path; verified anyway); reference gutter bubbles clear the bar at
+1.6-7.1% interior ink; full battery + 12-instance suite PASS identical.
+Commit 8.12.4 (production defaults still untouched; clean_chapter_full remains
+the opt-in orchestration).

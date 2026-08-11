@@ -80,6 +80,16 @@ EDGE_MARGIN = 3        # lines within this of the canvas edge are crop artifacts
 GUARD_STATS = {"zero_line": 0, "blank_evidence": 0, "inversion": 0}
 DENSE_INK = 0.15   # 8.11.2: borderless segment ink density at or above this =
                    # full-bleed art island, kept wholesale in clean_chapter
+RC_KEEP_INK_MIN = 0.01  # 8.12.4: a regular_cloud keep must have at least this
+                        # INTERIOR ink fraction (G < 100) or it protects an
+                        # empty hole (whited-out translation caption boxes,
+                        # a280337 diagnosis) and is skipped. Interior = region
+                        # inset past its own outline: the flagship empty box
+                        # measured 3.3% ink REGION-level purely from its 2px
+                        # border, so the region-level metric cannot separate;
+                        # interiors measure ~0 (empty) vs >= 5.9% (real text
+                        # bubbles) on the 80 measured chapter regions.
+RC_INSET_FRAC = 0.12    # inset = max(6 px, this fraction of the smaller dim)
 
 
 def _border_lines(rgb: np.ndarray):
@@ -399,6 +409,7 @@ def clean_chapter_full(rgb: np.ndarray, verbose: bool = False):
     units = units_for_processing(segs, H)
     rc_regions = 0
     rc_conflicts = 0
+    rc_empty_skipped = 0
     rc_keep = np.zeros((H, W), bool)
     for y0, y1, kinds in units:
         for (rx0, ry0, rx1, ry1) in detect(rgb[y0:y1], rc.PROFILE):
@@ -408,12 +419,26 @@ def clean_chapter_full(rgb: np.ndarray, verbose: bool = False):
             if overlaps:
                 rc_conflicts += 1
                 continue
+            # 8.12.4 empty-hole filter (composition policy, not detection --
+            # the profile stays untouched): keep only regions whose INTERIOR
+            # carries ink; see RC_KEEP_INK_MIN.
+            inset = max(6, int(RC_INSET_FRAC * min(rx1 - rx0, gy1 - gy0)))
+            iy0, iy1 = gy0 + inset, gy1 - inset
+            ix0, ix1 = rx0 + inset, rx1 - inset
+            if iy1 > iy0 and ix1 > ix0:
+                interior_ink = float((rgb[iy0:iy1, ix0:ix1, 1] < 100).mean())
+            else:
+                interior_ink = 1.0  # region too small to inset: not a box, keep
+            if interior_ink < RC_KEEP_INK_MIN:
+                rc_empty_skipped += 1
+                continue
             rc_regions += 1
             by0 = max(0, gy0 - E_BUBBLE); by1 = min(H, gy1 + E_BUBBLE)
             bx0 = max(0, rx0 - E_BUBBLE); bx1 = min(W, rx1 + E_BUBBLE)
             rc_keep[by0:by1, bx0:bx1] = True
     stats["rc_keep_regions"] = rc_regions
     stats["rc_spiky_conflicts"] = rc_conflicts
+    stats["rc_empty_skipped"] = rc_empty_skipped
     kept_from_delete = int((delete & rc_keep).sum())
     stats["rc_kept_px"] = kept_from_delete
     delete &= ~rc_keep
