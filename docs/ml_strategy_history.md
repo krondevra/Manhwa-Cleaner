@@ -3060,3 +3060,37 @@ docs/decisions.md gen-8 entries; condensed record here.
 
 Battery + 12-instance suite: PASS at mission start, after extraction, and at mission
 end — production and candidate pipelines untouched throughout.
+
+## Gen-8 continuation: sfx_glyph unblocked -- recipe decoded pixel-exact, profile + composition prototype shipped (2026-08-11, commits 8.6.1-8.8.2)
+
+The 8.5.1 concrete ask was answered: 6 reference PSDs + written recipe of the user's
+manual two-layer SFX process (same reverse-engineering discipline as v12/v21/v25 --
+PSD layer data over prose). Condensed record (full entries in decisions.md):
+
+- **8.6.1 decode**: both threshold passes SOLVED pixel-exact on all 6 files (0
+  mismatch px): aggressive pass = G >= 33 (Levels 32,1,33 -> Threshold 140 needs only
+  green's 0.587 luminosity weight); preservation pass = min(R,G,B) >= 50 (Levels
+  49,1,50 -> Threshold 230 needs all channels) -- the passes differ in predicate
+  STRUCTURE, not just value; both constant across files. Per-object Expand measured:
+  E ~2px thin strokes / ~4px thick (matches prose "2 small / 4+ large"). GT confirms
+  whole-frame-interior keep and wholesale gutter-bubble keep.
+- **8.7.1 sfx_glyph profile**: 6-attempt ladder, 1 counted failure (line-coverage
+  exclusion drawn at measured thickness: inventory art-mass "lines" swallow SFX).
+  Evidence: geometry cannot separate SFX from bubble text or sealed gutter pockets
+  from bubble interiors -- context filters moved to the composition where
+  over-admission is pixel-harmless. Final: 4 AND-voted signals
+  (elong/w_p90/iso_ink/bconc), refs recall 20/22 (both misses pixel-harmless),
+  harmful extras 0, synth FP pages 0/20, full chapters 5-8 s.
+- **8.7.2 integrity**: id-recycle cache hazard (found live in the sfx eval) fixed in
+  all three profiles; gates re-run: spiky equivalence IDENTICAL, regular_cloud set A
+  corrected 68 -> 67 (the delta was a stale-cache-masked spurious sliver hit).
+- **8.8.1 sfx.py prototype**: explicit composition (pass-1 binarize + border-line
+  frame band + connectivity-rescued SFX keeps + pocket bubbles). Acceptance vs PSD
+  GT: over-delete <= 0.233%, over-keep <= 1.264% (004_4 27.6% documented: dark-art-
+  merged border falls back to conservative full extent); **zero frame-content-loss
+  px on all 6 refs (hard guard PASS)**.
+
+Open residuals: 004_4-class borders merged into dark art (inventory cannot see
+them); sealed-gutter-pocket vs bubble separation (wall-material analysis, future
+ladder); chapter-scale per-panel banding = phase-2's rect-grouping open problem.
+Battery + 12-instance suite: PASS before and after, bookends identical.
