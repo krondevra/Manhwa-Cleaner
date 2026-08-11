@@ -3149,3 +3149,17 @@ B1 segmentation-driven keep: 0 adversarial px, 0 seam discontinuities, coverage
 Guards bypassed by design on the panel path (and measured insufficient at unit
 scope anyway); kept for standalone crops. Validation gap: one series' layout,
 light gutters only; dark domain paused. Battery PASS identical.
+
+## Gen-8 finale: merged to main, full orchestration shipped (2026-08-11, commits through 8.12.2)
+
+`testing` merged to `main` (fast-forward, 172 commits; user-authorized).
+Production defaults unchanged (clean_page_v10, 10.0-baseline.pt,
+find_spiky_sites all as before -- gen-8 is additive API). `clean_chapter_full`
+composes every gen-8 classifier: panel-aware sfx path + regular_cloud bubble
+keeps (spiky-conflict-excluded, 1 measured conflict) + spiky_cloud site
+deletions last (production site action + protected interiors, sole in-panel
+delete authority). Chapters 002/004: 44 s each, adversarial 0 in-panel deleted
+px outside spiky sites, spiky semantics visually confirmed (fringe deleted,
+protected text interiors kept). Reference architecture: docs/
+gen8_architecture.md. Scope: one series' layout validated; other layouts and
+the dark domain remain open, stated plainly.
