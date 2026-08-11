@@ -853,3 +853,31 @@ Gates re-run after the fix:
   adoption verdict (C 4->1, recall preserved) stands with A=67 as the honest
   baseline-parity figure (baseline's own 68 included the same spurious sliver).
 Commit 8.7.2.
+
+## Gen-8 sfx_glyph step 4: sfx.py composition prototype -- zero frame-loss on all 6 refs, over-delete <= 0.23% (2026-08-11 16:10 EEST)
+
+`src/classifiers/sfx.py`: explicit composition of the three classifiers per the
+decoded recipe -- pass-1 aggressive binarize (G >= 33) proposes deletion; subtracted
+keeps: (a) FRAME band from border-quality inventory lines (thin <= 20px, span >= 0.4,
+non-edge; an axis with < 2 border lines keeps FULL extent -- measured collapse
+without this rule: a single-line axis banded to the line's own 2px and deleted the
+panel), (b) SFX = profile detections grown by CONNECTIVITY under the pass-2 predicate
+(min(RGB) < 50) in a generously padded window, then dilated by the measured two-level
+Expand (2px thin / 4px thick strokes), (c) BUBBLES = enclosed pockets >= 3000px
+dilated by the same Expand mechanism (the recipe's wand-ON + Expand semantics;
+POCKET_MIN raised from 400 after measuring glyph-loop interiors wrongly kept).
+
+Acceptance vs PSD GT (sfx_suite.prototype_eval): over-delete 0.000-0.233%,
+over-keep 0.499-1.264% on 5 of 6 files; **HARD zero-frame-content-loss guard PASS:
+0 deleted px inside any annotated frame rect on all 6 files.** Iteration log:
+initial frame band collapsed on single-border-line axes (fixed, above); pass-2
+rescue confined to the detection bbox deleted 005's gutter blue-gradient glyph
+whole (fixed via connectivity rescue: 005 over-del 1.414 -> 0.067%).
+
+Known limitations (documented, not hidden): 004_4 over-keeps 27.6% -- its bottom
+border is only present inside a thick=169 dark-art inventory entry, so the y-axis
+falls back to conservative full extent (the guard holds; the delete bias yields);
+sealed gutter pockets are kept as bubbles (wall-material analysis would be needed to
+distinguish them -- future ladder); chapter-scale strips need per-panel banding
+(phase-2's open rect-grouping problem) -- the prototype targets page/crop scale like
+the manual recipe itself. Commit 8.8.1.

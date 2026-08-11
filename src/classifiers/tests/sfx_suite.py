@@ -248,6 +248,31 @@ def eval_profile(verbose=True):
     return tot_hit, tot_sfx, tot_fp, tot_harm
 
 
+def prototype_eval(verbose=True):
+    """sfx.py acceptance: pixel agreement vs PSD GT per reference file + the HARD
+    zero-frame-content-loss guard (no deleted px inside the annotated frame rects)."""
+    from classifiers.sfx import clean_sfx_region
+    print("file        over-del%   over-keep%   frame-loss-px")
+    worst = 0.0
+    total_frame_loss = 0
+    for stem in STEMS:
+        ref = load_ref(stem)
+        delete = clean_sfx_region(ref["raw"])
+        gt = ref["gt_delete"]
+        n = gt.size
+        over_del = float((delete & ~gt).mean()) * 100   # we delete, GT keeps
+        over_keep = float((~delete & gt).mean()) * 100  # we keep, GT deletes
+        floss = 0
+        for x0, y0, x1, y1 in FRAME_RECTS[stem]:
+            floss += int(delete[y0:y1 + 1, x0:x1 + 1].sum())
+        total_frame_loss += floss
+        worst = max(worst, over_del)
+        print(f"{stem:10}  {over_del:8.3f}   {over_keep:9.3f}   {floss}")
+    print(f"HARD GUARD frame-loss px total: {total_frame_loss} "
+          f"({'PASS' if total_frame_loss == 0 else 'FAIL'})")
+    return total_frame_loss
+
+
 if __name__ == "__main__":
     allrows = []
     for stem in STEMS:
