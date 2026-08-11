@@ -757,3 +757,44 @@ SFX crop set (like the clauds-and-ui crops) unblocks it immediately.
 Battery bookend: full battery + 12-instance suite re-run at mission end — PASS,
 numbers identical to mission start (pipeline untouched since 8.1.2's byte-identical
 extraction; classifiers are additive modules). Commit 8.5.1.
+
+## Gen-8 sfx_glyph unblock, step 1: 6 SFX reference PSDs decoded — both threshold passes solved pixel-exact, per-object Expand measured (2026-08-11 15:42 EEST)
+
+The concrete ask from 8.5.1 was answered: 6 reference PSDs + written recipe
+(`.tmp/scripts-manual/SFX/`, "SFX Pipeline" prose) documenting the user's manual
+two-layer SFX process. Same discipline as v12/v21/v25: PSD layer data is ground truth
+over the prose. `src/classifiers/tests/sfx_decode.py` decodes all 6 (GT keep/delete via
+the validated psd_extract `.composite()` path, canvas-scoped — each PSD is a crop
+window into a full page positioned at a large negative layer offset).
+
+**Threshold passes SOLVED, pixel-exact on all 6 files (0 mismatch px anywhere):**
+- Aggressive pass (`img-clone`, all 6 files): effective predicate **G >= 33** —
+  match 100.000%. Exactly the recipe's Levels(32,1,33)->Threshold(140) composition:
+  per-channel Levels binarizes at 32.5, Threshold 140/255=0.549 needs only the green
+  channel's Rec601 weight (0.587).
+- Preservation pass (`img-copy`, present in 005.psd only): effective predicate
+  **min(R,G,B) >= 50** — match 100.000%. Exactly Levels(49,1,50)->Threshold(230):
+  230/255=0.902 requires ALL channels white. It rescues saturated mid-tone color
+  (005's blue-gradient glyphs): 18/18 rescued diff components are 100% kept in GT.
+  The two passes differ by predicate STRUCTURE (G-only vs min-channel), not just value.
+- Both cutoffs constant wherever present; no third value found in any file.
+
+**Per-object Expand measured** (annulus keep-profile E_prof + nearest-delete E_del,
+cross-checked, neighboring-object ownership partition): clean isolated/gutter SFX show
+E ~2-3px at stroke width ~1.9px and E ~4-5px at stroke width 2.7-5.5px — matching the
+prose's "2px small / 4px+ large". Best simple rule on the ~12 measurable objects:
+two-level E = 2 if stroke_w < ~2.5px else 4 (fits within ~1px; sample too small to
+prefer a continuous fit; delete-over-preserve favors the smaller side).
+
+**Structure confirmed visually** (overlays in `.tmp/sfx_decode/`): whole-frame-interior
+keep (case 2/3 SFX cross panel borders seamlessly); crisp ~4px halos on gutter glyphs;
+004(2)/004(3) additionally keep gutter SPEECH BUBBLES wholesale (regular_cloud
+territory present in SFX GT — flagged for the prototype). Honest GT observation:
+in 004(1) (pass-1-only file) a light-red stroke segment of a glyph was thresholded
+away and IS deleted in the user's own GT — the exact defect pass 2 exists for,
+accepted manually there.
+
+Case coverage: case 1 (isolated gutter SFX) and case 2 (crossing frame edge) well
+represented; case 3 (fully inside frame) present in 004(2)/004(3)/004; no file is
+case-3-only. Decoded arrays cached to `.tmp/sfx_decode/export/*.npz` for downstream
+steps. Commit 8.6.1.
