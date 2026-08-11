@@ -57,6 +57,13 @@ E_BUBBLE = 4           # pocket Expand (recipe wand-ON + Expand 4 on bubbles)
 POCKET_MIN = 3000      # px: smaller enclosed pockets are glyph loops / small art
                        # holes, not bubbles (GT deletes a glyph loop's interior;
                        # aligned with the spiky candidate band's G_INT_MIN)
+WALL_MAX = 0.30        # B2: pocket wall fraction on lines/canvas-edge at or above
+                       # this = sealed gutter pocket -> delete (threshold set from
+                       # the measured per-pocket separation, see decisions.md)
+RESCUE_SEED_FRAC = 0.03  # C1: pass-2 rescue admits an ink2 component only if the
+                         # detection seed is >= this fraction of it (blocks large
+                         # barely-touching neighbors; a colored glyph's dark core
+                         # is ~0.09 of its full body on 005)
 BORDER_THICK = 20      # border-quality line: stroke thickness cap (corpus median
                        # ~12px; 004's left border measures 17)
 BORDER_SPAN_FRAC = 0.4  # ... and span at least this fraction of the page dimension
@@ -120,8 +127,13 @@ def frame_keep_mask(rgb: np.ndarray) -> np.ndarray:
     return keep
 
 
-def clean_sfx_region(rgb: np.ndarray) -> np.ndarray:
-    """Returns the delete mask (True = delete) for one page/crop."""
+def clean_sfx_region(rgb: np.ndarray, bubble_mode: str = "all") -> np.ndarray:
+    """Returns the delete mask (True = delete) for one page/crop.
+
+    bubble_mode: 'all' = every pocket >= POCKET_MIN kept (8.8.1 behavior);
+    'none' = pockets default to DELETE (the B1 flipped-default measurement);
+    'wall' = keep only pockets whose enclosure wall is free-standing ink, not
+    inventory lines / canvas edge (B2 wall-material test)."""
     H, W = rgb.shape[:2]
     white1 = rgb[..., 1] >= CUT_AGGR
     keep = frame_keep_mask(rgb)
@@ -144,8 +156,17 @@ def clean_sfx_region(rgb: np.ndarray) -> np.ndarray:
         seed = np.zeros_like(ink2)
         seed[y0 - wy0:y1 - wy0, x0 - wx0:x1 - wx0] = \
             ink1[y0:y1, x0:x1]
-        touched = np.unique(lab2[seed])
-        obj = np.isin(lab2, touched[touched > 0])
+        # C1 (8.9.2): admit a touched ink2 component only if the seed makes up at
+        # least RESCUE_SEED_FRAC of it -- unconditional connectivity grabbed large
+        # ADJACENT structures barely touching the seed (frame lines, neighboring
+        # art), the measured dominant over-keep source; a colored glyph's own body
+        # still passes (its dark core is a substantial fraction of the whole).
+        seed_ids, seed_counts = np.unique(lab2[seed], return_counts=True)
+        all_counts = np.bincount(lab2.ravel(), minlength=n2)
+        admit = [i for i, c in zip(seed_ids, seed_counts)
+                 if i > 0 and c / max(1, all_counts[i]) >= RESCUE_SEED_FRAC]
+        obj = np.isin(lab2, admit)
+        obj |= seed  # the detection's own ink is always kept
         dc = cv2.distanceTransform(obj.astype(np.uint8), cv2.DIST_L2, 3)
         wvals = dc[dc > 0]
         w_med = float(np.median(wvals) * 2.0) if wvals.size else 0.0
@@ -155,21 +176,53 @@ def clean_sfx_region(rgb: np.ndarray) -> np.ndarray:
                            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))) > 0
         sfx_keep[wy0:wy1, wx0:wx1] |= grown
     # --- bubble keeps: enclosed pockets + wall + halo via the same Expand ---
-    pockets = enclosed(white1)
-    num, lab, stats, _ = cv2.connectedComponentsWithStats(
-        pockets.astype(np.uint8), connectivity=8)
     bubble_keep = np.zeros((H, W), bool)
-    kb = 2 * E_BUBBLE + 1
-    ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kb, kb))
-    for i in range(1, num):
-        if int(stats[i, cv2.CC_STAT_AREA]) < POCKET_MIN:
-            continue
-        x, y, w, h = (int(stats[i, cv2.CC_STAT_LEFT]), int(stats[i, cv2.CC_STAT_TOP]),
-                      int(stats[i, cv2.CC_STAT_WIDTH]), int(stats[i, cv2.CC_STAT_HEIGHT]))
-        pad = E_BUBBLE + 2
-        wy0, wy1 = max(0, y - pad), min(H, y + h + pad)
-        wx0, wx1 = max(0, x - pad), min(W, x + w + pad)
-        grown = cv2.dilate((lab[wy0:wy1, wx0:wx1] == i).astype(np.uint8), ker) > 0
-        bubble_keep[wy0:wy1, wx0:wx1] |= grown
+    if bubble_mode != "none":
+        pockets = enclosed(white1)
+        num, lab, stats, _ = cv2.connectedComponentsWithStats(
+            pockets.astype(np.uint8), connectivity=8)
+        kb = 2 * E_BUBBLE + 1
+        ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kb, kb))
+        barrier = None
+        if bubble_mode == "wall":
+            from classifiers.profiles.sfx_glyph import _ctx
+            barrier = _ctx(rgb)["barrier"]
+        for i in range(1, num):
+            if int(stats[i, cv2.CC_STAT_AREA]) < POCKET_MIN:
+                continue
+            x, y, w, h = (int(stats[i, cv2.CC_STAT_LEFT]),
+                          int(stats[i, cv2.CC_STAT_TOP]),
+                          int(stats[i, cv2.CC_STAT_WIDTH]),
+                          int(stats[i, cv2.CC_STAT_HEIGHT]))
+            pad = E_BUBBLE + 2
+            wy0, wy1 = max(0, y - pad), min(H, y + h + pad)
+            wx0, wx1 = max(0, x - pad), min(W, x + w + pad)
+            pk = lab[wy0:wy1, wx0:wx1] == i
+            if bubble_mode == "wall" and _pocket_wall_frac(
+                    pk, barrier[wy0:wy1, wx0:wx1],
+                    (wy0, wx0, H, W)) >= WALL_MAX:
+                continue  # walled by lines/canvas edge = sealed gutter -> delete
+            grown = cv2.dilate(pk.astype(np.uint8), ker) > 0
+            bubble_keep[wy0:wy1, wx0:wx1] |= grown
 
     return white1 & ~keep & ~sfx_keep & ~bubble_keep
+
+
+def _pocket_wall_frac(pocket, barrier_win, geom) -> float:
+    """Fraction of a pocket's immediate wall ring lying on inventory-line barrier
+    px or the canvas edge -- the B2 wall-material evidence: a real bubble is walled
+    by free-standing drawn ink; a sealed GUTTER pocket is walled substantially by
+    frame lines and/or the canvas edge."""
+    wy0, wx0, H, W = geom
+    ring = (cv2.dilate(pocket.astype(np.uint8), _K3) > 0) & ~pocket
+    if not ring.any():
+        return 0.0
+    hw, ww = pocket.shape
+    yy, xx = np.nonzero(ring)
+    on_edge = ((yy + wy0 <= 1) | (yy + wy0 >= H - 2)
+               | (xx + wx0 <= 1) | (xx + wx0 >= W - 2))
+    on_line = barrier_win[yy, xx]
+    return float((on_edge | on_line).mean())
+
+
+_K3 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))

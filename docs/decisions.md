@@ -913,3 +913,40 @@ RESULT: 004(4) FN-delete (over-keep) 34.064 -> 0.527% white-only (160,870 -> 2,6
 px) at a cost of 20 over-deleted px (0.003%); predicted border row 772 vs
 hand-annotated 771. Other 5 refs BIT-IDENTICAL (they never enter the 1-line path).
 HARD GUARD: 0 frame-loss px on all 6. Commit 8.9.1.
+
+## Gen-8 sfx.py residuals: residual 2 measured as a NON-ISSUE (B1/B2 honest negatives), C1 rescue seed-fraction gate adopted (2026-08-11 18:37 EEST)
+
+**Residual 2 (sealed-gutter-pocket vs bubble) -- measured, both attempts negative:**
+Per-pocket measurement across all 6 refs at POCKET_MIN=3000: every pocket the
+bubble-keep touches is 100% GT-KEPT -- the sealed-gutter-pocket population flagged
+at 8.8.1 does not exist in the current configuration (it was real at the earlier
+POCKET_MIN=400; the 3000 floor already removed it). Consequences, measured:
+- B1 (flip ambiguous default to delete, the brief's explicit question): FP-delete
+  explodes 0.106 -> 6.862% (004_2) and 0.155 -> 4.295% (004_3) white-only, while
+  FN-delete improves by at most 0.022 points. VERDICT: pure error relocation at
+  ~500:1 harm ratio, NOT a real improvement under any priority ordering -- bubbles
+  are content the manual GT keeps, not background mess. Honest negative, default
+  stays keep-all-pockets.
+- B2 (wall-material test, threshold 0.30): no sealed pockets exist to catch, and
+  the test MISFIRES on a real bubble -- 004_3's (279,664) pocket overlaps the frame
+  border (wall_frac 0.41, GT-kept 100%) and would be wrongly deleted. Honest
+  negative in the current data; the wall-material idea stays documented for when a
+  reference with actual sealed pockets appears. bubble_mode='none'/'wall' remain in
+  clean_sfx_region as measurement instrumentation, default 'all'.
+
+**FN attribution** (where the remaining over-keep lives): 0% of GT-deleted px are
+pass-1 ink (the formula's floor is clean -- GT never deletes what pass-1 calls
+ink); the dominant bucket is sfx_keep over-growth from the unconditional
+connectivity rescue grabbing large barely-touching neighbors (frame lines,
+adjacent art), plus frame-band margins (8-26%/file) and bubble halos.
+
+**C1 (one variable): rescue seed-fraction gate** -- a touched ink2 component is
+admitted only if the detection seed is >= 3% of it (RESCUE_SEED_FRAC; a colored
+glyph's dark core is ~9% of its body on 005, so real glyph bodies pass; a grabbed
+frame line is <<3% seed). RESULT: aggregate FP-delete 4097 -> 3465 px and
+FN-delete 30647 -> 26828 px across the 6 refs -- BOTH independent quantities
+improved; per-file: 004_1 improves on both (FP 1157 -> 33 px, FN 4024 -> 2114);
+004_2 trades +206 FP for -1163 FN (the priority-preferred direction); 004_3
++286 FP / -43 FN (small, sanctioned direction); 004/004_4 bit-identical.
+HARD GUARD: 0 frame-loss px on all 6 throughout -- the priority shift touched only
+ambiguous keep-vs-delete resolution, never the guard. Commit 8.9.2.
