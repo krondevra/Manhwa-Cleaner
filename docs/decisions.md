@@ -881,3 +881,35 @@ sealed gutter pockets are kept as bubbles (wall-material analysis would be neede
 distinguish them -- future ladder); chapter-scale strips need per-panel banding
 (phase-2's open rect-grouping problem) -- the prototype targets page/crop scale like
 the manual recipe itself. Commit 8.8.1.
+
+## Gen-8 sfx.py residuals, priority reversal round: A1 border extrapolation -- 004(4) over-keep 34% -> 0.5% (2026-08-11 18:33 EEST)
+
+USER PRIORITY CHANGE governing this round: over-delete preferred to under-delete,
+under-keep preferred to over-keep (aggressive deletion is manually recoverable,
+background mess is not). Explicitly: this applies to keep-vs-delete resolution in
+ambiguous background regions ONLY -- the zero-frame-content-loss adversarial guard
+stays HARD and unchanged. Dark-background domain stays PAUSED: measured, the 6 refs
+are white-domain throughout (GT-deleted background 99.4-100% light per file;
+residual 0.26-0.58% dark px are stroke anti-aliasing) -- domain mixing is a
+non-issue in this test set; eval now reports white-only AND total denominators.
+
+Metrics note (stated once): binary masks have exactly two independent pixel error
+quantities -- FP-delete (we delete, GT keeps) = over-delete = under-keep, and
+FN-delete (we keep, GT deletes) = under-delete = over-keep. prototype_eval reports
+both, px and %, white-only and total.
+
+**A1 (one variable), frame_keep_mask**: an axis with exactly ONE border-quality
+line no longer keeps the full extent. The merged-into-dark-art border is invisible
+to the inventory AS A LINE, but the art-mass entry's FAR EDGE is where the mass --
+and the border -- ends; the band extrapolates from the border line to the farthest
+far-edge among other inventory entries on the panel side (the side holding the
+majority of entries). No-anchor safety: with zero other entries the axis keeps full
+extent (hard guard outranks delete bias where no evidence exists). Class-B's
+"starved" lesson respected: this anchors on measured inventory evidence, not pure
+rectangle-geometry prediction (004(4) has only ONE confirmed side, so 3-sides
+extrapolation is unanchorable there).
+
+RESULT: 004(4) FN-delete (over-keep) 34.064 -> 0.527% white-only (160,870 -> 2,652
+px) at a cost of 20 over-deleted px (0.003%); predicted border row 772 vs
+hand-annotated 771. Other 5 refs BIT-IDENTICAL (they never enter the 1-line path).
+HARD GUARD: 0 frame-loss px on all 6. Commit 8.9.1.

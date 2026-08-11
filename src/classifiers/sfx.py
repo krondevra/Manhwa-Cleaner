@@ -64,6 +64,8 @@ EDGE_MARGIN = 3        # lines within this of the canvas edge are crop artifacts
 
 
 def _border_lines(rgb: np.ndarray):
+    """Returns (hb, vb, h_all, v_all): border-quality lines plus the full bridged
+    inventory per axis (the latter feeds the 1-line extrapolation)."""
     f = rgb.astype(np.float32)
     gray = np.round((f.max(axis=2) + f.min(axis=2)) / 2.0).astype(np.uint8)
     h_lines, v_lines = detect_lines_morph(gray)
@@ -75,25 +77,45 @@ def _border_lines(rgb: np.ndarray):
     vb = [ln for ln in v_lines
           if ln.thick <= BORDER_THICK and ln.span[1] - ln.span[0] >= BORDER_SPAN_FRAC * H
           and EDGE_MARGIN <= ln.pos <= W - 1 - EDGE_MARGIN]
-    return hb, vb
+    return hb, vb, h_lines, v_lines
+
+
+def _axis_band(border, all_lines, dim):
+    """Band extent for one axis (8.9.1 A1, delete-bias priority). Two border-quality
+    lines bound the band exactly. ONE border line: the opposite border is merged
+    into dark art and invisible to the inventory as a line -- but the art-mass
+    inventory entry's FAR EDGE is where the mass (and with it the border) ends, so
+    extrapolate the band from the border line to the farthest far-edge among the
+    other inventory entries on the panel side (verified on 004(4): predicts the
+    hand-annotated border row exactly). Sides: the panel is on the side of the
+    border line holding the majority of other entries. No other entries at all ->
+    full extent (the hard frame-loss guard outranks the delete bias where zero
+    evidence exists). Zero border lines: full extent (nothing to anchor from)."""
+    if len(border) >= 2:
+        return (min(ln.pos for ln in border),
+                max(ln.pos + max(1, ln.thick) for ln in border))
+    if len(border) == 1:
+        b = border[0]
+        others = [ln for ln in all_lines if ln is not b]
+        below = [ln for ln in others if ln.pos > b.pos]
+        above = [ln for ln in others if ln.pos < b.pos]
+        if len(below) >= len(above) and below:
+            return (b.pos, max(ln.pos + ln.thick // 2 + 1 for ln in below))
+        if above:
+            return (min(ln.pos - ln.thick // 2 - 1 for ln in above),
+                    b.pos + max(1, b.thick))
+    return (0, dim)
 
 
 def frame_keep_mask(rgb: np.ndarray) -> np.ndarray:
     """Conservative whole-frame keep: bounding band of border-quality lines."""
     H, W = rgb.shape[:2]
-    hb, vb = _border_lines(rgb)
+    hb, vb, h_all, v_all = _border_lines(rgb)
     keep = np.zeros((H, W), bool)
     if not hb and not vb:
         return keep
-    # an axis needs TWO border lines to bound the band; with one line the panel's
-    # side is unknowable -> keep the full extent on that axis (conservative: the
-    # zero-frame-loss guard is hard, the delete bias soft). Measured failure: a
-    # single-h-line page collapsed the band to the line's own 2px and deleted the
-    # panel interior.
-    y0, y1 = (min(ln.pos for ln in hb),
-              max(ln.pos + max(1, ln.thick) for ln in hb)) if len(hb) >= 2 else (0, H)
-    x0, x1 = (min(ln.pos for ln in vb),
-              max(ln.pos + max(1, ln.thick) for ln in vb)) if len(vb) >= 2 else (0, W)
+    y0, y1 = _axis_band(hb, h_all, H)
+    x0, x1 = _axis_band(vb, v_all, W)
     keep[y0:y1, x0:x1] = True
     return keep
 

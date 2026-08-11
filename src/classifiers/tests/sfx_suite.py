@@ -248,29 +248,47 @@ def eval_profile(verbose=True):
     return tot_hit, tot_sfx, tot_fp, tot_harm
 
 
+DARK_G = 100  # px with G < this are dark-domain (PAUSED domain, excluded from the
+              # white-only metric denominators; measured: 99.4-100% of GT-deleted
+              # background in the 6 refs is light, so white-only ~ total here)
+
+
 def prototype_eval(verbose=True):
-    """sfx.py acceptance: pixel agreement vs PSD GT per reference file + the HARD
-    zero-frame-content-loss guard (no deleted px inside the annotated frame rects)."""
+    """sfx.py acceptance vs PSD GT + the HARD zero-frame-content-loss guard.
+
+    Metrics: on binary masks there are exactly TWO independent pixel error
+    quantities -- FP-delete (we delete, GT keeps) a.k.a. over-delete = under-keep,
+    and FN-delete (we keep, GT deletes) a.k.a. under-delete = over-keep. Both are
+    reported per file, on two denominators: WHITE-only (dark-domain px G < DARK_G
+    excluded -- the mission target; dark-background domain is paused) and TOTAL
+    (visibility only)."""
     from classifiers.sfx import clean_sfx_region
-    print("file        over-del%   over-keep%   frame-loss-px")
-    worst = 0.0
+    print("file        FPdel_w%  FNdel_w%   FPdel_t%  FNdel_t%   FPdel_px FNdel_px  frame-loss")
     total_frame_loss = 0
+    rows = {}
     for stem in STEMS:
         ref = load_ref(stem)
         delete = clean_sfx_region(ref["raw"])
         gt = ref["gt_delete"]
-        n = gt.size
-        over_del = float((delete & ~gt).mean()) * 100   # we delete, GT keeps
-        over_keep = float((~delete & gt).mean()) * 100  # we keep, GT deletes
+        fp = delete & ~gt   # over-delete = under-keep
+        fn = ~delete & gt   # under-delete = over-keep
+        white = ref["raw"][..., 1] >= DARK_G
+        nw = max(1, int(white.sum()))
+        fp_w = float((fp & white).sum()) / nw * 100
+        fn_w = float((fn & white).sum()) / nw * 100
+        fp_t = float(fp.mean()) * 100
+        fn_t = float(fn.mean()) * 100
         floss = 0
         for x0, y0, x1, y1 in FRAME_RECTS[stem]:
             floss += int(delete[y0:y1 + 1, x0:x1 + 1].sum())
         total_frame_loss += floss
-        worst = max(worst, over_del)
-        print(f"{stem:10}  {over_del:8.3f}   {over_keep:9.3f}   {floss}")
+        rows[stem] = dict(fp_w=fp_w, fn_w=fn_w, fp_t=fp_t, fn_t=fn_t,
+                          fp_px=int(fp.sum()), fn_px=int(fn.sum()), floss=floss)
+        print(f"{stem:10}  {fp_w:7.3f}  {fn_w:8.3f}   {fp_t:7.3f}  {fn_t:8.3f}"
+              f"   {int(fp.sum()):8d} {int(fn.sum()):8d}  {floss}")
     print(f"HARD GUARD frame-loss px total: {total_frame_loss} "
           f"({'PASS' if total_frame_loss == 0 else 'FAIL'})")
-    return total_frame_loss
+    return rows, total_frame_loss
 
 
 if __name__ == "__main__":
