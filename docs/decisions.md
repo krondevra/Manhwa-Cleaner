@@ -798,3 +798,37 @@ Case coverage: case 1 (isolated gutter SFX) and case 2 (crossing frame edge) wel
 represented; case 3 (fully inside frame) present in 004(2)/004(3)/004; no file is
 case-3-only. Decoded arrays cached to `.tmp/sfx_decode/export/*.npz` for downstream
 steps. Commit 8.6.1.
+
+## Gen-8 sfx_glyph step 3: profile shipped after a 6-attempt ladder (1 counted failure with measured root cause) (2026-08-11 16:02 EEST)
+
+`src/classifiers/tests/sfx_suite.py` (labeling harness: manual frame-rect reference
+annotations anchored to the validated line inventory; auto-labels frame_line /
+bubble_part / sfx; per-candidate geometry features) + `src/classifiers/profiles/
+sfx_glyph.py` (full attempt log in the module docstring).
+
+Evidence-first signal choice: measured feature table showed SFX geometry OVERLAPS
+bubble text (both glyphs) and bubble outlines / frame lines (thin uniform curves) --
+context separates those, and the ladder proved the context filters belong in the
+COMPOSITION, not the profile: gutter flood is fragile (leaks through border runs
+broken by bubbles/steam, over-seals pockets; 4 measured misses) and ring-enclosure
+cannot tell sealed gutter pockets from bubble interiors (2 measured misses at
+ring=1.0). Both filters dropped (A2, A3 -- recall 16->22); over-admission is
+pixel-harmless because frame-keep/bubble-keep cover those regions downstream.
+
+Line-structure FPs killed in three steps: A4 pixel-coverage-under-inventory-lines
+(synth 14->0 but recall -4: COUNTED FAILURE -- inventory art-mass entries with
+thick=100-300 drawn at measured thickness swallow real SFX), A5 barrier thickness cap
+30px (recall recovered), A6 boundary-concentration signal (border bands/rect outlines
+0.93-1.00 vs glyph strokes <=0.74; synth FP pages -> 0/20).
+
+Final: **recall 20/22** (2 permanent misses are border+steam merged components, kept
+via frame interior in composition -- pixel-harmless), **harmful extras 0** (no
+detection sits on GT-deleted ink anywhere in the 6 refs), **synth FP pages 0/20**,
+chapters 002/019 run in 5-8 s (~1500-1750 stroke-structure detections; visual sample
+audit: real SFX + bubble text + in-frame art strokes, both latter classes harmless).
+
+Also fixed here: id()-keyed page caches held no reference to the page, so a freed
+array's recycled id could serve a stale context (measured: 004_4 evaluated with
+another file's lines). sfx_glyph now holds the page reference; the same latent hazard
+exists in spiky_cloud/regular_cloud caches -- fix + gate re-verification queued as a
+separate commit. Commit 8.7.1.
