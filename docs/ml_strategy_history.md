@@ -3121,3 +3121,17 @@ End state, white-only per file (FP-delete / FN-delete %): 004 0.19/1.02,
 004(1) 0.01/0.38, 004(2) 0.16/1.42, 004(3) 0.21/1.16, 004(4) 0.00/0.53,
 005 0.08/0.46. Total disagreement across the 6 refs: 195k -> 30k px this round.
 Battery + suite PASS, identical to the standing bookend.
+
+## Gen-8 sfx.py safety-guard round: merge blocker closed with three no-op guards (2026-08-11, commit 8.10.1)
+
+Content-loss classes found in visual review, closed as no-ops (degrade to nothing,
+not damage): (1) zero-border-line windows (66 measured) -- module is a no-op with
+no protective context; (2) spurious bands on full-bleed art (the named 002 y37100
+case had FOUR qualifying lines from a caption box -- closed by requiring the
+outside-band region to actually look like blank gutter, refs 0.94-0.96 vs damage
+0.03-0.28); (3) band inversion on cut-panel windows (band captures the gutter
+between panels; detectable as inside-blanker-than-outside, refs never inverted).
+Guard ordering: hard frame-loss guard > safety no-op guards > delete-bias >
+ambiguous-keep. 6-ref suite bit-identical, A1 path intact, battery identical.
+Merge recommendation: explicit opt-in on panel-complete crops/pages; blanket
+windowed application still needs per-panel banding (phase-2 open problem).
