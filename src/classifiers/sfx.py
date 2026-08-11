@@ -347,3 +347,86 @@ def clean_chapter(rgb: np.ndarray, verbose: bool = False):
     if verbose:
         print(f"clean_chapter: {stats}")
     return delete, stats
+
+
+def clean_chapter_full(rgb: np.ndarray, verbose: bool = False):
+    """Gen-8 FULL ORCHESTRATION (8.12.1): every gen-8 classifier composed into
+    one chapter-scale delete decision. Reference architecture -- see
+    docs/gen8_architecture.md for the full description. Order and authority:
+
+      1. clean_chapter(rgb)          panel-aware sfx path: segmentation-driven
+                                     keeps (panels/partials/dense-borderless),
+                                     gutter treatment with sfx_glyph stroke
+                                     keeps + pocket bubble keeps.
+      2. regular_cloud keeps         per processing unit: profile-accepted
+                                     bubble-family regions (+E_BUBBLE halo)
+                                     subtracted from the delete -- classified
+                                     bubble protection on top of the pocket
+                                     rule. Regions overlapping a spiky site are
+                                     EXCLUDED (conflict rule: the separately
+                                     validated spiky deletion outranks a cloud
+                                     keep -- clouds classify as 'thorn' family,
+                                     so overlaps are expected, counted, and
+                                     resolved, not ignored).
+      3. spiky_cloud site deletions  applied LAST: the equivalence-proven
+                                     profile detects the v23 sites; each gets
+                                     the production-validated site action
+                                     `pipeline.clean_spiky_region_clipped` with
+                                     the background classifier's protected
+                                     interiors. The ONLY in-panel delete
+                                     authority in the composition (carried by
+                                     the 12-instance suite validation);
+                                     overrides any keep.
+
+    Returns (delete_mask, stats). Does NOT alter clean_chapter / production
+    defaults; new additive API."""
+    sys.path.insert(0, str(HERE.parents[1] / "src" / "spiky"))
+    import pipeline as spiky_pipeline
+    from classifiers.background import protected_interiors
+    from classifiers.panel_segmentation import (segment_chapter,
+                                                units_for_processing)
+    from classifiers.profiles import regular_cloud as rc
+    from classifiers.profiles import spiky_cloud as sc
+
+    H, W = rgb.shape[:2]
+    delete, stats = clean_chapter(rgb)
+    sites = detect(rgb, sc.PROFILE)
+    stats["spiky_sites"] = len(sites)
+
+    # regular_cloud keeps, per unit (the profile's candidate generator is
+    # page-relative; units are the page-scale scope this generation processes at)
+    segs = segment_chapter(rgb)
+    units = units_for_processing(segs, H)
+    rc_regions = 0
+    rc_conflicts = 0
+    rc_keep = np.zeros((H, W), bool)
+    for y0, y1, kinds in units:
+        for (rx0, ry0, rx1, ry1) in detect(rgb[y0:y1], rc.PROFILE):
+            gy0, gy1 = ry0 + y0, ry1 + y0
+            overlaps = any(rx0 < sx1 and rx1 > sx0 and gy0 < sy1 and gy1 > sy0
+                           for sx0, sy0, sx1, sy1 in sites)
+            if overlaps:
+                rc_conflicts += 1
+                continue
+            rc_regions += 1
+            by0 = max(0, gy0 - E_BUBBLE); by1 = min(H, gy1 + E_BUBBLE)
+            bx0 = max(0, rx0 - E_BUBBLE); bx1 = min(W, rx1 + E_BUBBLE)
+            rc_keep[by0:by1, bx0:bx1] = True
+    stats["rc_keep_regions"] = rc_regions
+    stats["rc_spiky_conflicts"] = rc_conflicts
+    kept_from_delete = int((delete & rc_keep).sum())
+    stats["rc_kept_px"] = kept_from_delete
+    delete &= ~rc_keep
+
+    # spiky site deletions last -- override every keep inside their sites
+    f = rgb.astype(np.float32)
+    gray = np.round((f.max(axis=2) + f.min(axis=2)) / 2.0).astype(np.uint8)
+    prot = protected_interiors(gray)
+    before = delete.copy()
+    for bbox in sites:
+        delete = spiky_pipeline.clean_spiky_region_clipped(
+            rgb, delete, bbox, protected=prot)
+    stats["spiky_deleted_px"] = int((delete & ~before).sum())
+    if verbose:
+        print(f"clean_chapter_full: {stats}")
+    return delete, stats

@@ -1076,3 +1076,33 @@ active for standalone clean_sfx_region use (defense-in-depth on arbitrary
 crops). The root cause (fixed windows cutting panels) is REMOVED, not mitigated:
 units are cut at gutter midpoints, panels are whole by construction, and the
 keep comes from validated whole-chapter segmentation. Commit 8.11.2.
+
+## Gen-8 finale: merge to main + full orchestration (2026-08-11 20:25 EEST)
+
+Part 1 (user-authorized merge): `testing` merged into `main` -- fast-forward
+(testing strictly ahead on shared history; no rewrite, no merge commit needed),
+main at 15734d0, 172 commits. On main: full battery + 12-instance suite PASS
+identical to the standing bookend; 6-ref SFX suite bit-identical, hard guard 0.
+PRODUCTION DEFAULTS UNCHANGED: clean_page_v10 stays the spiky production
+default, 10.0-baseline.pt + --reclaim-islands stays the ML path,
+pipeline.find_spiky_sites remains the production spiky caller (not re-pointed).
+Gen-8 classifiers are importable, additive APIs only.
+
+Part 2 (8.12.1): `clean_chapter_full` -- verified spiky_cloud/regular_cloud were
+NOT yet composed (standalone only); wired by composition, not new mechanism:
+panel-aware clean_chapter, then regular_cloud bubble keeps per processing unit
+(spiky-overlapping regions excluded -- conflict rule: validated spiky deletion
+outranks a cloud keep), then spiky_cloud site deletions LAST via the
+production-validated clean_spiky_region_clipped + background protected
+interiors (the only in-panel delete authority). Reference architecture written
+to docs/gen8_architecture.md.
+
+Part 3 measured (chapters 002/004, all classifiers): 44 s/chapter; 10/9 spiky
+sites (profile lists = production lists per the standing equivalence); 45/35
+regular_cloud keep regions, 1/0 spiky-conflicts (expected 'thorn'-family
+overlap, counted and resolved); spiky site deletions 133k/115k px; UPDATED
+CHAPTER ADVERSARIAL: every in-panel deleted px lies inside a spiky site --
+0 px outside on both chapters. Visual verification: spiky sites show production
+semantics (thorn fringe deleted, protected text-bubble interiors kept); A1
+region and damage-class regions identical to the panel-aware round. Commit
+8.12.1.
