@@ -1001,3 +1001,38 @@ height windowing still produces thin art slivers at window seams when a cut
 panel's remainder passes the guards (seen at 004 y78850's top edge, ~30 rows) --
 per-panel banding (the phase-2 open problem) is the real fix for blanket
 application. Commit 8.10.1.
+
+## Gen-8 chapter-scale panel segmentation shipped: all 6 refs reproduced, damage classes identified at segmentation level (2026-08-11 19:53 EEST)
+
+`src/classifiers/panel_segmentation.py` -- whole-chapter typed segmentation
+(gutter/panel/partial/borderless) removing the fixed-window root cause. Primary
+signal: row-blankness band decomposition (whole-chapter, vectorized, ~8 s/chapter
+including the line inventory); frame.py border lines then PARTITION bands from
+within. 5-attempt ladder, 1 counted failure:
+
+- A1 edge-adjacency classification: COUNTED FAILURE, measured -- floating gutter
+  SFX merges into the panel's content band (004(4): border line mid-band, all
+  bands borderless) and pale panel interiors split bands (004: panel bottom lost
+  75 rows); plus a leading-run merge bug fabricated 2-row bands (fixed).
+- A2 line-band reconciliation (new family): lines partition bands; in-band
+  intervals classified by own blankness; two-tier run lengths (MIN_GUTTER=80 --
+  pale in-panel gaps measure 45-75 rows, real gutters 150+). 4/6 refs exact.
+- A3 partial far-edge refinement: REUSES the A1-far-edge evidence (an art-merged
+  border ends where its inventory art-mass entry ends): 004(4) partial lands at
+  772 vs annotated 771, bottom glyph zone split off as borderless.
+- A4 adjacent-gutter border absorption (cap 120 px + blank-continuation test):
+  004's thin bottom border, swallowed by the blank run after a pale interior,
+  again closes its panel -> (377,912) exact.
+- A5 blank-neighbor validation: a border separates content from GUTTER; lines
+  deep inside continuous content (caption boxes/building edges on full-bleed
+  art) do not. Panel/partial without a gutter or strip end within 300 rows
+  demotes to borderless. y37100 -> borderless (identified, not just guarded);
+  y51300's brick panel stays 'panel' WITH BOTH BORDERS (the full-chapter-scope
+  win: fixed windows only ever saw its facing border).
+
+Validation: all 6 refs reproduce the hand-annotated FRAME_RECTS (4 exact panels,
+004(4) = borderless glyph zone + partial at 771+-1 + borderless, 005 exact);
+chapters 002/004: 73/71 processing units (gutter-midpoint cuts, panels never cut
+mid-body by construction), segmentation maps rendered for review. Chapter-scale
+border-quality criteria documented: v-line span is ABSOLUTE (panel-height
+scaled), not chapter-fraction (the recurring scale lesson). Commit 8.11.1.
