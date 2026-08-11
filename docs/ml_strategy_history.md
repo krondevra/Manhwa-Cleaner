@@ -3135,3 +3135,17 @@ Guard ordering: hard frame-loss guard > safety no-op guards > delete-bias >
 ambiguous-keep. 6-ref suite bit-identical, A1 path intact, battery identical.
 Merge recommendation: explicit opt-in on panel-complete crops/pages; blanket
 windowed application still needs per-panel banding (phase-2 open problem).
+
+## Gen-8 panel-aware architecture round: fixed-window root cause removed (2026-08-11, commits 8.11.1-8.11.2)
+
+`panel_segmentation.py` (whole-chapter typed segmentation: row-blankness bands +
+line partition reconciliation; 5-attempt ladder, 1 counted failure) reproduces
+all 6 refs' hand-annotated rects and IDENTIFIES the fixed-window damage classes
+(y37100 borderless, y51300 complete panels with both borders). `clean_chapter`
+(panel-aware driver) first-wiring counted failure caught by the new chapter
+adversarial (387k/493k px inside panels; unit-scope guard dilution measured) ->
+B1 segmentation-driven keep: 0 adversarial px, 0 seam discontinuities, coverage
+37.7/37.3% vs 4.1/3.6% guard-era, 6-ref suite bit-identical, ~18 s/chapter.
+Guards bypassed by design on the panel path (and measured insufficient at unit
+scope anyway); kept for standalone crops. Validation gap: one series' layout,
+light gutters only; dark domain paused. Battery PASS identical.
