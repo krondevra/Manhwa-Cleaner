@@ -64,6 +64,10 @@ RESCUE_SEED_FRAC = 0.03  # C1: pass-2 rescue admits an ink2 component only if th
                          # detection seed is >= this fraction of it (blocks large
                          # barely-touching neighbors; a colored glyph's dark core
                          # is ~0.09 of its full body on 005)
+BLANK_G = 200          # 8.10.1: near-blank gutter tone (G channel)
+BLANK_MIN = 0.60       # 8.10.1: outside-band region must be at least this blank
+                       # for the band to count as proven panel/gutter structure
+                       # (refs 0.94-0.96; damage classes 0.03-0.28)
 BORDER_THICK = 20      # border-quality line: stroke thickness cap (corpus median
                        # ~12px; 004's left border measures 17)
 BORDER_SPAN_FRAC = 0.4  # ... and span at least this fraction of the page dimension
@@ -114,10 +118,11 @@ def _axis_band(border, all_lines, dim):
     return (0, dim)
 
 
-def frame_keep_mask(rgb: np.ndarray) -> np.ndarray:
-    """Conservative whole-frame keep: bounding band of border-quality lines."""
+def frame_keep_mask(rgb: np.ndarray, lines=None) -> np.ndarray:
+    """Conservative whole-frame keep: bounding band of border-quality lines.
+    `lines` may carry a precomputed `_border_lines(rgb)` result."""
     H, W = rgb.shape[:2]
-    hb, vb, h_all, v_all = _border_lines(rgb)
+    hb, vb, h_all, v_all = lines if lines is not None else _border_lines(rgb)
     keep = np.zeros((H, W), bool)
     if not hb and not vb:
         return keep
@@ -135,8 +140,48 @@ def clean_sfx_region(rgb: np.ndarray, bubble_mode: str = "all") -> np.ndarray:
     'wall' = keep only pockets whose enclosure wall is free-standing ink, not
     inventory lines / canvas edge (B2 wall-material test)."""
     H, W = rgb.shape[:2]
+    # ZERO-BORDER-LINE SAFETY GUARD (8.10.1): a window with no border-quality line
+    # on EITHER axis has zero protective context -- pass-1 would classify colored
+    # full-bleed art as deletable background (measured: ~32% of a pure-art window
+    # deleted, 002 y37100). Such a window is a NO-OP: degrade to nothing, not to
+    # damage, same principle as the chapter-scale band. The threshold is EXACTLY
+    # zero lines total: a single line still anchors the A1 far-edge extrapolation
+    # (004(4)) and must not be caught here. Guard ordering: hard frame-loss guard
+    # > this zero-line no-op guard > delete-bias priority > ambiguous-keep -- the
+    # delete bias applies only where SOME frame protection exists.
+    lines = _border_lines(rgb)
+    hb, vb = lines[0], lines[1]
+    if len(hb) + len(vb) == 0:
+        return np.zeros((H, W), bool)
     white1 = rgb[..., 1] >= CUT_AGGR
-    keep = frame_keep_mask(rgb)
+    keep = frame_keep_mask(rgb, lines=lines)
+    # BLANK-GUTTER EVIDENCE GUARD (8.10.1 attempt 2): border-quality lines alone do
+    # not prove a panel/gutter structure -- on full-bleed art, caption-box borders
+    # and building edges qualify as lines, the band anchors to them, and everything
+    # outside (pure colored art) is deleted (measured: 31.7% of 002 y37100, whose
+    # window has FOUR qualifying lines). Corroborate the band with what it claims:
+    # the outside-band region must actually look like blank gutter. Measured
+    # separation: refs 0.94-0.96 near-blank outside their bands vs 0.03-0.28 on all
+    # three damage classes (spurious band, cut panels, dark-scene windows). Below
+    # the bar -> no protective context is proven -> NO-OP, same degrade-to-nothing
+    # principle and same guard ordering as the zero-line guard above.
+    outside = ~keep
+    if outside.any():
+        g = rgb[..., 1] if rgb.ndim == 3 else rgb
+        out_blank = float((g[outside] >= BLANK_G).mean())
+        if out_blank < BLANK_MIN:
+            return np.zeros((H, W), bool)
+        # BAND-INVERSION GUARD (8.10.1 attempt 3): when a window shows two panels
+        # cut at its edges, the only in-window border lines are the panels' facing
+        # borders and the band captures the GUTTER between them -- keeping blank
+        # gutter and deleting the cut panels' art (measured: 002 y51300 and 3
+        # siblings, inside_blank 0.91-0.99 vs outside 0.61-0.66). A band that is
+        # BLANKER inside than outside is such an inversion: refs measure inside
+        # 0.37-0.55 vs outside 0.94-0.96, never inverted. Inverted -> NO-OP.
+        if keep.any():
+            in_blank = float((g[keep] >= BLANK_G).mean())
+            if in_blank > out_blank:
+                return np.zeros((H, W), bool)
 
     # --- SFX keeps: profile detections, pass-2 rescue inside the region, expand ---
     ink1 = ~white1

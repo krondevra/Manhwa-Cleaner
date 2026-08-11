@@ -950,3 +950,54 @@ improved; per-file: 004_1 improves on both (FP 1157 -> 33 px, FN 4024 -> 2114);
 +286 FP / -43 FN (small, sanctioned direction); 004/004_4 bit-identical.
 HARD GUARD: 0 frame-loss px on all 6 throughout -- the priority shift touched only
 ambiguous keep-vs-delete resolution, never the guard. Commit 8.9.2.
+
+## Gen-8 sfx.py safety guards (pre-merge blocker closed): zero-line no-op + blank-gutter evidence + band-inversion check (2026-08-11 19:20 EEST)
+
+Visual review found content loss the metrics never saw. Root-cause turned out to be
+TWO classes, not one -- the brief's zero-line diagnosis was incomplete and is
+corrected here with measurements:
+
+**Attempt 1 -- zero-border-line no-op guard** (the brief's spec): a window with no
+border-quality line on either axis returns an all-False delete mask (genuine
+no-op; pass-1 never runs). Threshold is EXACTLY zero lines total -- one line still
+feeds the A1 far-edge extrapolation. Scope: PROCESSING-WINDOW, because that is the
+scope the frame band protects at (lines elsewhere on a page do not protect a
+window they don't appear in). Verified: all 66 zero-line windows across chapters
+002/004 now delete exactly 0 px; guard fires on NO reference (boundary check
+printed per file, 004(4) with exactly 1 line stays on the A1 path).
+BUT: the named case 002 y37100 has FOUR qualifying lines (caption-box borders +
+building edges) -- its 31.7% art deletion is a SPURIOUS-BAND class, not zero-line.
+
+**Attempt 2 -- blank-gutter evidence guard**: the band must be corroborated by
+what it claims -- the outside-band region must actually look like blank gutter
+(G >= 200 fraction >= 0.60). Measured separation: refs 0.94-0.96 vs damage classes
+0.03-0.28. Closes y37100 (31.7 -> 0.000%) and most cut-panel/dark-scene windows.
+Residual found by distribution scan: no clean threshold gap -- 002 y51300-class
+damage passes at 0.61 while healthy pink-gutter windows sit at 0.63.
+
+**Attempt 3 -- band-inversion guard**: the y51300 class is structural -- a window
+showing two panels cut at its edges yields only their FACING borders as lines, so
+the band captures the GUTTER (keeping blank, deleting the cut panels' art).
+Directly detectable: inverted bands are BLANKER INSIDE than outside (damage 0.91-
+0.99 inside vs 0.61-0.66 outside; refs 0.37-0.55 inside vs 0.94-0.96 outside,
+never inverted). inside_blank > outside_blank -> no-op. All 4 measured inversion
+windows -> 0.000%.
+
+**GUARD PRIORITY ORDERING (explicit):** hard frame-content-loss guard > safety
+no-op guards (zero-line, blank-evidence, inversion) > delete-bias priority >
+ambiguous-background-keep. The delete bias applies only where SOME proven frame
+protection exists; it was never meant for windows with no protective context.
+
+Verification: 6-ref suite BIT-IDENTICAL to 8.9.2 (incl. hard guard 0 px); A1
+region on real chapter unchanged (27.1%); census: 71 of 217 chapter windows
+actively clean, 146 are proven-context no-ops; battery + 12-instance suite PASS,
+identical to standing bookend.
+
+**Merge-readiness (honest):** sfx.py now degrades to no-op instead of damage on
+every measured failure class, at the cost of under-cleaning (some legitimate
+gutter stays; safe direction). Recommended application remains explicit opt-in on
+panel-complete crops/pages (the manual workflow's own unit): arbitrary fixed-
+height windowing still produces thin art slivers at window seams when a cut
+panel's remainder passes the guards (seen at 004 y78850's top edge, ~30 rows) --
+per-panel banding (the phase-2 open problem) is the real fix for blanket
+application. Commit 8.10.1.
