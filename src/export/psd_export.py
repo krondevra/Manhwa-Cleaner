@@ -1,10 +1,15 @@
 """PSD layered-mask export: package pipeline detection as Photopea-editable
 layers instead of an interactive GUI (2026-08-12 direction).
 
-Per chapter, parts of <= PART_ROWS rows (the user's own proven 50k-part PSD
-convention). pytoshop enforces the 30k-row PSD spec limit, so parts are
-written as PSB (version 2, limit 300k rows -- Photopea-native):
-`<chapter>_touchup-N.psb` with layers (bottom-up):
+Per chapter, parts of <= PART_ROWS rows. FORMAT LESSON (2026-08-12
+empty-canvas diagnostic): the first ship used PSB v2 + zip layer channels +
+pytoshop's default merged composite; Photopea listed the layers but rendered
+a transparent canvas, and pytoshop's merged composite is ALL BLACK (PIL
+proved it) -- psd-tools round-tripped its own writer's output, hiding the
+third-party decode failure. The fix is maximum compatibility: PSD v1 + RLE
+layer channels (the universal combination; PIL independently decodes it) +
+a REAL merged composite (the base art), at 30,000-row parts (the v1 spec
+cap): `<chapter>_touchup-N.psd` with layers (bottom-up):
 
   base              original art, visible
   pipeline_result   white px + alpha where the automatic delete mask fires
@@ -15,10 +20,12 @@ from delete.npy + rgb); walls 2-6 are bbox fills from zones.json. Toggle a
 layer to see its flags over the art; Ctrl-click its thumbnail in Photopea to
 load the alpha as a selection; paint into it to adjust.
 
-Writer: pytoshop 1.2.1 with three py3.14/numpy2 compatibility shims (see
-_shim_pytoshop): negative constant-channel scalars, the broken RLE
-constant path (zip compression avoids it), and the NUL-terminated unicode
-layer names. Round-trip verification uses psd-tools (reader only).
+Writer: pytoshop 1.2.1 with py3.14/numpy2 compatibility shims (see
+_shim_pytoshop): negative constant-channel scalars, the missing `packbits`
+module reference in the RLE paths (the PyPI `packbits` C package is
+injected), and the NUL-terminated unicode layer names. Verification uses
+TWO independent readers: psd-tools (per-layer) AND PIL (merged composite,
+v1+RLE) -- a lesson from the empty-canvas bug.
 
 Usage: .venv/bin/python src/export/psd_export.py <chapter.png> <sidecar_dir>
        [out_dir=<sidecar_dir>] [name=<chapter>]
@@ -36,7 +43,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-PART_ROWS = 50000
+PART_ROWS = 30000
 WALL_LAYERS = {1: "wall1_semantic", 2: "wall2_spiky_remnant",
                3: "wall3_broken_ring", 4: "wall4_ui_card",
                5: "wall5_dark_zone", 6: "wall6_pale_band"}
@@ -45,6 +52,9 @@ WALL_LAYERS = {1: "wall1_semantic", 2: "wall2_spiky_remnant",
 def _shim_pytoshop():
     import pytoshop.codecs as codecs
     import pytoshop.util as util
+
+    import packbits
+    codecs.packbits = packbits   # pytoshop references it without importing
 
     _orig = codecs.compress_image
 
@@ -132,9 +142,15 @@ def export_chapter(chapter_png: str | Path, sidecar_dir: str | Path,
                       1: np.ascontiguousarray(sub[..., 1]),
                       2: np.ascontiguousarray(sub[..., 2])}))
         psd = nested_layers.nested_layers_to_psd(
-            layers, color_mode=3, compression=enums.Compression.zip,
-            version=enums.Version.psb)
-        path = out / f"{name}_touchup-{pi}.psb"
+            layers, color_mode=3, compression=enums.Compression.rle,
+            version=enums.Version.psd)
+        # pytoshop leaves the merged composite black -- write the real art
+        # so PIL/thumbnails/every merged-data reader sees content
+        from pytoshop.image_data import ImageData
+        psd.image_data = ImageData(
+            channels=np.ascontiguousarray(sub.transpose(2, 0, 1)),
+            compression=enums.Compression.rle)
+        path = out / f"{name}_touchup-{pi}.psd"
         with open(path, "wb") as f:
             psd.write(f)
         written.append(path)
@@ -157,6 +173,10 @@ def verify_roundtrip(chapter_png: str | Path, sidecar_dir: str | Path,
     for pi, path in enumerate(parts, start=1):
         y0 = (pi - 1) * PART_ROWS
         y1 = min(rgb.shape[0], y0 + PART_ROWS)
+        # independent reader 2: PIL reads the MERGED composite (v1+RLE)
+        pil = np.array(Image.open(path).convert("RGB"))
+        if not np.array_equal(pil, rgb[y0:y1]):
+            print(f"  {path.name}: PIL merged composite DIFFERS"); ok = False
         p = PSDImage.open(path)
         names = {l.name for l in p}
         if names != expect_names:

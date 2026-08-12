@@ -1859,3 +1859,32 @@ stays. Neither satisfies the standing constraints; classical closure would
 need a text-vs-SFX classifier (same frontier as the deferred UI-card work).
 Gates: battery identical (log), 6-ref suite unchanged frame-loss 0,
 FRAME_RECTS ALL PASS (unchanged code path), production defaults untouched.
+
+## PSB empty-canvas diagnostic: root cause = writer compatibility (zip layer channels + BLACK merged composite); fix = PSD v1 + RLE + real composite, verified by TWO independent readers (2026-08-12 12:23 EEST)
+
+Symptom: Photopea listed all 8 layers with correct thumbnails but rendered
+a transparent canvas. Step 0 confirmed the shipped files were genuine PSB
+v2 (signature 8BPS/0002) -- the ".psd" name in the user's screenshot was a
+user-side rename, a red herring for the render bug.
+
+Diagnosis (matrix of {v1,v2} x {zip,rle} 2000-row exports): per-LAYER data
+was byte-correct in every variant (psd-tools: base RGB exact, alpha 255) --
+but (a) pytoshop writes the MERGED composite section ALL BLACK (PIL, which
+reads only merged data, proved it), and (b) zip-compressed layer channels
+are the compatibility risk for third-party readers; psd-tools round-
+tripping its own writer's output could never catch either. GIMP was
+unusable as a proxy (it hung even on the user's own known-good PSD in
+batch mode -- environment issue, discarded).
+
+Fix (one attempt, A1): PSD v1 + RLE layer channels (the universally
+supported combination; requires the PyPI `packbits` C module pytoshop
+references but never imports -- injected via the shim) + a REAL merged
+composite (base art written through pytoshop ImageData) + 30,000-row parts
+(v1 spec cap; 002 = 4 parts, 27-68 MB each). VERIFICATION LESSON, now
+enforced in the tool: round-trip via the writing library alone is NOT
+sufficient proof for interchange formats -- verify_roundtrip now checks
+BOTH psd-tools (per-layer alpha/RGB exact) AND PIL (merged composite
+exact) on every part. All 4 parts of 002: ALL PASS both readers; fresh
+copies on the Desktop. REMAINING GATE: the user opening them in Photopea
+-- success is NOT claimed until then. sidecar.py and production defaults
+untouched.
