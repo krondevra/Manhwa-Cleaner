@@ -1664,3 +1664,32 @@ present, out of scope). Decoded, MEASURED, not assumed:
   white deleted-to-white is invisible in this GT -- FP/FN see content px
   only; blank handling is metric-neutral. Established dual-denominator
   conventions (DARK_G=100 white-only + total) reused via the fixpass harness.
+
+## Guard audit (fix-pass, diagnostic-only): adversarial guard PASSES 0 on both gold chapters while GT measures ~1M content px wrongly deleted per chapter -- blindness confirmed, scope BROADER than sliver-collapse (2026-08-12 09:19 EEST)
+
+Method: current guard logic (deleted px inside segmentation's own panel/
+partial rects outside spiky bboxes) on baseline clean_chapter_full masks vs
+independent GT damage (content px G<200 we delete that the manual clean
+keeps), chapters gold001/gold002, .tmp/saved/chapters GT.
+
+RESULT: guard verdict 0 adversarial px on BOTH chapters; GT-measured content
+FP-delete 1,025,155 px (gold001: 148,255 ink + 876,900 midtone) and
+1,081,118 px (gold002: 150,757 ink + 930,361 midtone). The guard is
+structurally blind to ~1M damaged px per chapter.
+
+Exposure scope (honest): NOT isolated to the sliver-collapse crop instance.
+Band classification of the top damage: dominated by sparse-BORDERLESS bands
+under gutter treatment (the case-C DENSE_INK family) on both chapters incl.
+gold001 (a chapter the pipeline was never tuned on); gold002 additionally
+shows 3 sliver bands -- y61-63k is a SECOND, previously unknown sliver
+instance besides the diagnosed y78k -- and site-seam bands. Prior
+"0 adversarial px" claims (8.11.2, 8.12.1) must be read as "no deletions
+inside recognized panel rects", NOT as content safety; re-verification on
+other chapters is warranted after the fixes.
+
+PROPOSED (not implemented): an independent per-band bound needing neither GT
+nor segmentation rects -- per row-band (e.g. 1000 rows), bound the deleted
+fraction of the band's CONTENT px (source G<200); measured healthy bands
+delete only stroke-level content (SFX) while damaged bands delete 20-240k
+content px, so a measured threshold separates them; bands over the bound
+degrade to no-op (the standing degrade-to-nothing principle).
