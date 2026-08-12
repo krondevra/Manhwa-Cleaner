@@ -70,6 +70,15 @@ ABSORB_MAX = 120     # px: a border line at most this far into the adjacent blan
 GUTTER_REACH = 300   # px: a panel/partial must have a gutter or strip end within
                      # this reach; otherwise its lines are art-interior edges
                      # (y37100-class) and it demotes to borderless
+MIN_XSPAN = 240      # px: fix-3b -- a line-derived x-extent narrower than this
+                     # is ONE-SIDED evidence (a border-decoration line cluster
+                     # on a single side, e.g. the 004 y78096 diagonal panel's
+                     # five right-edge lines at x642-661 -> 21px sliver whose
+                     # band then got gutter treatment: 100,966 content px
+                     # deleted invisibly to the adversarial guard). Panels in
+                     # the gold corpus measure >= ~0.5 W wide; below MIN_XSPAN
+                     # the extent falls back to full width (keep-side default,
+                     # consistent with the <2-line rule).
 
 
 @dataclass
@@ -154,8 +163,10 @@ def _x_extent(vb, y0: int, y1: int, W: int):
     vv = [ln for ln in vb
           if min(ln.span[1], y1) - max(ln.span[0], y0) >= 0.6 * (y1 - y0)]
     if len(vv) >= 2:
-        return (min(ln.pos for ln in vv),
-                max(ln.pos + max(1, ln.thick) for ln in vv))
+        x0 = min(ln.pos for ln in vv)
+        x1 = max(ln.pos + max(1, ln.thick) for ln in vv)
+        if x1 - x0 >= MIN_XSPAN:  # fix-3b: two-sided evidence required
+            return x0, x1
     return 0, W
 
 

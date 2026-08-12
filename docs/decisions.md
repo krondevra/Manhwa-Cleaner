@@ -1760,3 +1760,22 @@ gold002 150,757 ink + 930,361 mid -> 73,662 + 374,623.
 FN-ink flat (+2k). Silhouette probe FPmid 39,647 -> 5,277 (residue: a
 33-row cfrac-0.186 fragment of the figure + gutter-typed slices -- noted,
 not chased, per the measured ratio collapse). _x_extent untouched (3b).
+
+## Fix 3b (case C, sub-cause 2): _x_extent two-sided evidence (MIN_XSPAN=240) -- sliver collapse eliminated, gold002 sliver damage recovered, attempt A1 SUCCESS (2026-08-12 09:51 EEST)
+
+One variable in panel_segmentation._x_extent: a >= 2-line x-extent narrower
+than MIN_XSPAN=240 px is one-sided evidence (border-decoration cluster on a
+single side) and falls back to full width -- the keep-side default,
+consistent with the existing < 2-line rule. The 004 y78096 diagonal panel
+(five right-edge lines at x642-661 -> 21 px sliver, 100,966 px deleted
+invisibly to the guard) now types x0-690 full width.
+
+Sliver scan after: ZERO panel/partial segments narrower than 240 px on
+gold001, gold002, and 004 (was: one sliver on 004, three sliver bands on
+gold002 y61-63k/78k per the audit). gold002 whole-chapter content FP drops
+FPink 73,662 -> 21,961 and FPmid 374,623 -> 114,614 (the sliver bands'
+content recovered); gold001 unchanged (it had no slivers -- consistent with
+the audit's classification). 8.11.1 reference-rect reproduction re-run with
+the new rule: ALL 6 refs still reproduce their annotated FRAME_RECTS.
+(Ref npz cache path note: .tmp/sfx_decode -> .tmp/gen8/sfx_decode symlink
+restored after the scratch reorganization; suite code untouched.)
