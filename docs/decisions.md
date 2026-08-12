@@ -1817,3 +1817,45 @@ sparse-band content BELOW CONTENT_DENSE -- the default-delete asymmetry
 itself. Architectural PROPOSAL (not implemented, user decision): in sparse
 content bands, gutter treatment should require positive background evidence
 instead of default-delete. Recorded in the investigation report.
+
+## Sparse-gap pass: 3 hypothesis families measured NON-separable, 4th (ink-context density) yields a CLEAN PARTIAL fix -- 20,425 px recovered at 778 speck px FN; remainder is an HONEST NEGATIVE (2026-08-12 11:00 EEST)
+
+Goal: close the residual gold001 44,657 / gold002 9,797 FPink without any
+background residue (default-keep proposal rejected by user). Families tried,
+one variable each, all thresholds measured not guessed:
+
+- H2a graduated kept-core rescue (area x seed grid): NO separating cell --
+  undetected SFX keeps its dark cores exactly like real content (gold002
+  FN_add 49k constant across the whole grid). Counted failure.
+- H2b component-granularity gates: structurally impossible -- content
+  components (G<200) merge through gutter pink into a 25.6M px chapter-
+  spanning mega-component; ink components (G<100) merge through borders into
+  a 7.27M px one; px-level classes mix inside "kept" components. Counted
+  failure (and it invalidates the plan-mode 97%-rescuable readout, which the
+  mega-component artifact had inflated).
+- H2c fragment geometry (area/elong on deleted-ink fragments): distributions
+  overlap at every quantile. Counted failure.
+- H3 kept-context density: overlaps (gold002 A med 0.037 vs B med 0.017;
+  best cell recovers 3.1k while adding 3.9k). Counted failure.
+- H1 canvas-edge strokes: INVERSE separation -- the thin/tall edge-touching
+  class holds 33,072 GT-deleted px (speed-line class) vs 4,152 GT-kept
+  (border strokes). Counted failure.
+- H4 neighborhood-ink density (the sfx_glyph iso principle at fragment
+  scale): ONE-SIDED CLEAN SIGNAL -- GT-deleted (SFX) fragments sit at iso
+  p90=0.16; kept-structure fragments reach 0.72+. Shipped as
+  `_ink_context_rescue` (sfx.py, ISO_RESCUE=0.30, ISO_BLUR=121, site bboxes
+  excluded, composition-final step): gold001 FPink 44,657 -> 27,576, gold002
+  9,797 -> 7,231; FN cost 777+1 px in 16 comps (max 186 px, embedded in
+  ink-dense zones -- speck-scale, no structure residue).
+
+HONEST NEGATIVE for the remainder (gold001 27.6k / gold002 7.2k FPink): the
+kept-vs-deleted distinction there is SEMANTIC (translated text and border
+strokes vs original SFX strokes) -- geometrically alike, context-alike, and
+by construction undetectable by the sfx profile (the deleted SFX is exactly
+what the profile already misses). Best-achievable numbers measured for both
+failure modes: rescuing everything = +34.7k structure-scale background
+residue on gold002; rescuing nothing = the 34.8k combined content damage
+stays. Neither satisfies the standing constraints; classical closure would
+need a text-vs-SFX classifier (same frontier as the deferred UI-card work).
+Gates: battery identical (log), 6-ref suite unchanged frame-loss 0,
+FRAME_RECTS ALL PASS (unchanged code path), production defaults untouched.

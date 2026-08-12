@@ -114,6 +114,19 @@ TEXT_COMP_MAX = 2000    # ... and the component is text-scale. Large pale art
                         # domain); measured sweep: without the cap the rescue
                         # adds 147k px of wrongly-kept SFX skirt (gold002),
                         # with it 8.7k px of sub-70px specks.
+ISO_RESCUE = 0.30       # sparse-gap fix (H4): a deleted-ink fragment whose
+                        # 60px-neighborhood ink density reaches this is part
+                        # of a dense kept structure (title art, dark panels,
+                        # border clusters) -- rescued. Measured px-weighted on
+                        # the gold cleans: GT-deleted (SFX) fragments sit at
+                        # iso p90=0.16; above 0.30 the rescue recovers 17,081
+                        # px (gold001) + 2,566 (gold002) at FN cost 777+1 px
+                        # (16 comps, max 186 px -- speck-scale). Geometry
+                        # (area/elong), kept-fraction, and kept-context
+                        # density all measured NON-separable; this is the
+                        # only clean one-sided signal found (3 families
+                        # exhausted first -- see decisions.md).
+ISO_BLUR = 121          # box size realizing the 60px neighborhood reach.
 SITE_G_TOL = 55         # fix-2: gutter-context site interior band, same
                         # min-channel floor as the production action (wand
                         # tolerance 200 from white; pipeline.G_TOL).
@@ -474,6 +487,38 @@ def _text_skirt_rescue(rgb: np.ndarray, delete: np.ndarray,
     return admit[lab] & delete
 
 
+def _ink_context_rescue(rgb: np.ndarray, delete: np.ndarray,
+                        sites: list) -> np.ndarray:
+    """Sparse-gap fix (H4): un-delete ink fragments embedded in ink-dense
+    neighborhoods. The residual sparse-band damage class is mid-gray strokes
+    (G 33-99) of KEPT structures (title art, border clusters, art fragments)
+    that pass-1 catches; original-SFX strokes -- which must STAY deleted --
+    live in sparse fields (measured iso p90=0.16 vs kept-structure fragments
+    reaching 0.72+). Fragments = components of the deleted-ink px themselves
+    (structure-level components are useless here: content merges through
+    gutter pink and ink merges through borders into chapter-spanning
+    mega-components, both measured). Site bboxes excluded. Returns px to
+    un-delete."""
+    ink = rgb[..., 1] < 100
+    insite = np.zeros(delete.shape, bool)
+    for (sx0, sy0, sx1, sy1) in sites:
+        insite[sy0:sy1, sx0:sx1] = True
+    cand = delete & ink & ~insite
+    if not cand.any():
+        return np.zeros(delete.shape, bool)
+    dens = cv2.blur(ink.astype(np.float32), (ISO_BLUR, ISO_BLUR))
+    num, lab, stats, _ = cv2.connectedComponentsWithStats(
+        cand.astype(np.uint8), connectivity=8)
+    out = np.zeros(delete.shape, bool)
+    for i in range(1, num):
+        x, y, w, h = (stats[i, cv2.CC_STAT_LEFT], stats[i, cv2.CC_STAT_TOP],
+                      stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT])
+        m = lab[y:y + h, x:x + w] == i
+        if float(dens[y:y + h, x:x + w][m].mean()) >= ISO_RESCUE:
+            out[y:y + h, x:x + w] |= m
+    return out
+
+
 def clean_chapter_full(rgb: np.ndarray, verbose: bool = False):
     """Gen-8 FULL ORCHESTRATION (8.12.1): every gen-8 classifier composed into
     one chapter-scale delete decision. Reference architecture -- see
@@ -592,6 +637,11 @@ def clean_chapter_full(rgb: np.ndarray, verbose: bool = False):
     rescued = _text_skirt_rescue(rgb, delete, sites)
     stats["text_rescued_px"] = int(rescued.sum())
     delete &= ~rescued
+
+    # sparse-gap fix (H4): ink fragments in ink-dense neighborhoods.
+    ink_rescued = _ink_context_rescue(rgb, delete, sites)
+    stats["ink_ctx_rescued_px"] = int(ink_rescued.sum())
+    delete &= ~ink_rescued
     if verbose:
         print(f"clean_chapter_full: {stats}")
     return delete, stats
