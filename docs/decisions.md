@@ -1187,3 +1187,32 @@ touch that path; verified anyway); reference gutter bubbles clear the bar at
 1.6-7.1% interior ink; full battery + 12-instance suite PASS identical.
 Commit 8.12.4 (production defaults still untouched; clean_chapter_full remains
 the opt-in orchestration).
+
+## Diagnostic round (case A of A/B/C user-crop pass): caption text without backing box -- source has NO box; glyph-keep granularity erodes translated text (2026-08-12 08:53 EEST)
+
+User crops (004_red chunks 29-36, window y63800-81400) show translated numbered
+captions rendering on raw red with no/partial white backing. Measured on main
+a4849a9, diagnostic only, no code changed.
+
+Source truth first: the caption bands (cap1 y73490-73574, cap4 y77990-78045)
+are 70-87% pure white in the SOURCE -- there is no drawn backing box under the
+text; the whited-out template boxes sit ADJACENT (cap4's first-line left
+portion overlaps the flagship y77840 box, rc-kept at interior ink 1.4%, which
+reads as a "partial box"). NOT an 8.12.4 regression: the step-0 dump lists
+every rc detection in the window (4 total); none spans the caption text, and
+the one 8.12.4-removed empty box (y73145-73238 x18-104) is not under any text.
+Text-on-red has existed since 8.11.2 wherever the band is gutter-typed.
+
+The DEFECT is keep granularity, not the missing box: gutter treatment deletes
+13.4% (cap1) / 16.7% (cap4) of the captions' ink px and 21.5% / 64.9% of their
+midtone (anti-aliased stroke) px -- visible glyph erosion in the cleaned
+output. Counter-instance cap5 (y79396) loses only 1.2%/0.0% because its
+segment happens to be typed dense-borderless and is kept wholesale --
+segmentation luck, not a caption-aware decision. Owner: sfx.py gutter
+treatment / sfx_glyph keep granularity (composition); panel_segmentation only
+determines which bands are exposed; background.py / frame.py uninvolved.
+No PSD GT covers the window (viewports measured: 004 y2257-3225 / y3262-4141 /
+y23415-24188 / y51457-52382 / y91980-92825) -- accounting is source-vs-output
+with the established ink/midtone/blank conventions, flagged no-GT.
+Recommendation: FIX family = caption text-line keep (protect glyph bbox rows
+incl. anti-aliased skirt) -- same family as the 8.12.3 "tinting" side note.
