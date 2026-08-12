@@ -102,6 +102,18 @@ TEXT_COMP_MAX = 2000    # ... and the component is text-scale. Large pale art
                         # domain); measured sweep: without the cap the rescue
                         # adds 147k px of wrongly-kept SFX skirt (gold002),
                         # with it 8.7k px of sub-70px specks.
+SITE_G_TOL = 55         # fix-2: gutter-context site interior band, same
+                        # min-channel floor as the production action (wand
+                        # tolerance 200 from white; pipeline.G_TOL).
+SITE_CLOUD_CLOSE = 25   # fix-2: closing kernel bridging the radial ticks of
+                        # a spiky cloud into one silhouette (tick gaps
+                        # measure up to ~15 px on the gold002 sites).
+SITE_CLOUD_MARGIN = 6   # fix-2: silhouette margin (anti-aliased skirt).
+SITE_PANEL_COVER = 0.5  # fix-2: a site bbox at least this covered by
+                        # panel/partial rects runs the PANEL-context
+                        # production action (12-instance-validated),
+                        # otherwise the gutter-context cloud-silhouette
+                        # action.
 
 
 def _border_lines(rgb: np.ndarray):
@@ -371,6 +383,53 @@ def clean_chapter(rgb: np.ndarray, verbose: bool = False):
     return delete, stats
 
 
+def _clean_spiky_site_gutter(rgb: np.ndarray, delete: np.ndarray,
+                             bbox: tuple, prot: np.ndarray,
+                             panel_keep: np.ndarray) -> np.ndarray:
+    """Fix-2 (case B): GUTTER-context site action. The production action
+    (validated in PANEL context by the 12-instance suite) wholesale-keeps
+    everything but the detected fringe inside its bbox and clears pass-1
+    deletions there -- measured at 002 y71625: it resurrected 82,670 gutter
+    blank px, manufacturing a kept white rectangle with a torn contour. The
+    manual reference at gutter sites is the opposite shape: a smooth balloon
+    -- everything in the site zone is deleted EXCEPT the CLOUD SILHOUETTE:
+    the sealed interior plus the connected content structure around it
+    (outline ring, radial spikes, inter-spike white), morphologically closed
+    into one organic shape. Attempt 2-A1 (keep only interior+ring, the May-
+    etalon smooth-balloon target) was a COUNTED FAILURE: the full-chapter
+    cleans supersede the May spot etalons and KEEP the spiky fringe at all
+    10 gold002 + 3 gold001 sites (src ink changed <= 4%), black-filling the
+    background up to the silhouette; deleting spikes measured FPink 1.9k ->
+    12.1k. 2-A2 keeps the silhouette; protected interiors and panel/partial
+    content the bbox dips into are kept as well."""
+    x0, y0, x1, y1 = bbox
+    H, W = delete.shape
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(W, x1), min(H, y1)
+    sub = rgb[y0:y1, x0:x1]
+    band = sub.min(axis=2) >= SITE_G_TOL
+    k3 = np.ones((3, 3), np.uint8)
+    barrier = cv2.morphologyEx((~band).astype(np.uint8), cv2.MORPH_CLOSE, k3) > 0
+    interior = enclosed(band & ~barrier)
+    seed = (interior | ~band).astype(np.uint8)
+    kc = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                   (SITE_CLOUD_CLOSE, SITE_CLOUD_CLOSE))
+    cloud = cv2.morphologyEx(seed, cv2.MORPH_CLOSE, kc) > 0
+    # only silhouette components anchored on the interior count as the cloud
+    # (stray dark content elsewhere in the bbox must not ride in)
+    num, lab = cv2.connectedComponents(cloud.astype(np.uint8), connectivity=8)
+    anchored = np.unique(lab[interior])
+    cloud = np.isin(lab, anchored[anchored != 0])
+    km = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                   (2 * SITE_CLOUD_MARGIN + 1,
+                                    2 * SITE_CLOUD_MARGIN + 1))
+    cloud = cv2.dilate(cloud.astype(np.uint8), km) > 0
+    keep = cloud | prot[y0:y1, x0:x1] | panel_keep[y0:y1, x0:x1]
+    out = delete.copy()
+    out[y0:y1, x0:x1] = ~keep
+    return out
+
+
 def _text_skirt_rescue(rgb: np.ndarray, delete: np.ndarray,
                        sites: list) -> np.ndarray:
     """Fix-1 (case A, composition policy): un-delete text-scale content
@@ -486,14 +545,33 @@ def clean_chapter_full(rgb: np.ndarray, verbose: bool = False):
     stats["rc_kept_px"] = kept_from_delete
     delete &= ~rc_keep
 
-    # spiky site deletions last -- override every keep inside their sites
+    # spiky site deletions last -- override every keep inside their sites.
+    # fix-2 (case B): the action is CONTEXT-DISPATCHED -- panel-context sites
+    # get the production action unchanged (12-instance-validated semantics);
+    # gutter-context sites get the smooth-balloon action, because the
+    # production action's wholesale-keep resurrects gutter blank inside its
+    # bbox (measured 82,670 px at 002 y71625 -> torn white rectangles).
     f = rgb.astype(np.float32)
     gray = np.round((f.max(axis=2) + f.min(axis=2)) / 2.0).astype(np.uint8)
     prot = protected_interiors(gray)
+    panel_keep = np.zeros((H, W), bool)
+    for s in segs:
+        if s.kind in ("panel", "partial"):
+            panel_keep[s.y0:s.y1, s.x0:s.x1] = True
     before = delete.copy()
+    gutter_sites = 0
     for bbox in sites:
-        delete = spiky_pipeline.clean_spiky_region_clipped(
-            rgb, delete, bbox, protected=prot)
+        bx0, by0, bx1, by1 = bbox
+        cover = float(panel_keep[max(0, by0):by1, max(0, bx0):bx1].mean()) \
+            if by1 > by0 and bx1 > bx0 else 0.0
+        if cover >= SITE_PANEL_COVER:
+            delete = spiky_pipeline.clean_spiky_region_clipped(
+                rgb, delete, bbox, protected=prot)
+        else:
+            gutter_sites += 1
+            delete = _clean_spiky_site_gutter(rgb, delete, bbox, prot,
+                                              panel_keep)
+    stats["gutter_sites"] = gutter_sites
     stats["spiky_deleted_px"] = int((delete & ~before).sum())
 
     # fix-1 (case A): text-skirt rescue, LAST -- runs on the final mask so the

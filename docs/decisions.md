@@ -1713,3 +1713,31 @@ specks). Site probe metrics bit-identical. text_rescued_px stat added
 (19,158 / 8,116). Honest note: caption-band FNw rises a few pp because the
 manual clean trims glyph skirts slightly tighter than the full component we
 keep -- over-keep at glyph-skirt scale, the reading direction of the fix.
+
+## Fix 2 (case B): context-dispatched site action -- GT REVERSED the target (spikes are KEPT, background black-filled); cloud-silhouette keep, attempt 2-A2+A3 SUCCESS after 2-A1 counted failure (2026-08-12 09:37 EEST)
+
+GT finding that reshaped the fix: 100.0% of ALL GT-changed px in BOTH full
+chapters are BLACK fill -- the manual clean deletes background by repainting
+it black (release style), and at ALL 13 sites across the two chapters it
+KEEPS the entire spiky cloud (source ink changed <= 4%). The May spot
+etalons (002_5/002_6, smooth-ellipse-to-white) are SUPERSEDED by the
+full-chapter cleans per the brief; keep/delete comparisons remain valid
+(fill color is downstream styling), with the noted semantic that blank px
+the manual black-filled count as GT-delete (style-recoverable class).
+
+2-A1 (smooth balloon per the old etalons: keep sealed interior + ring only)
+= COUNTED FAILURE: FPink at site_b1 1,916 -> 12,112 (deleting spikes the GT
+keeps); FN did not drop (the black-fill zone extends beyond the bbox).
+2-A2: gutter-context action keeps the CLOUD SILHOUETTE -- sealed interior +
+connected content, closed with SITE_CLOUD_CLOSE=25 (tick gaps ~15 px),
+interior-anchored components only, everything else in the bbox deleted;
+panel-context sites (bbox >= SITE_PANEL_COVER=0.5 inside panel/partial
+rects) keep the production action unchanged; pipeline.py untouched.
+2-A3 refinement: SITE_CLOUD_MARGIN 4 -> 6 (site_b2 halo skirt).
+
+Measured (fix1+2 vs fix1): gold002 FPink 145,756 -> 108,508 (-37k: the
+production fringe deletion was itself chapter-scale FP vs this GT), FPmid
+-52k; site_b1 FP content 1,916+1,036 -> 0+0; site_b2 3,037+1,061 -> 4+3,774.
+gold001 FPink 144,073 -> 131,126. FNw +0.3-0.4pp (kept silhouette blank the
+manual black-fills -- style-recoverable). All 13 sites classified
+gutter-context on these chapters; 12-instance suite path untouched.
