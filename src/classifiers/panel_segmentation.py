@@ -79,6 +79,19 @@ MIN_XSPAN = 240      # px: fix-3b -- a line-derived x-extent narrower than this
                      # the gold corpus measure >= ~0.5 W wide; below MIN_XSPAN
                      # the extent falls back to full width (keep-side default,
                      # consistent with the <2-line rule).
+X_COL_CONTENT = 0.10  # gen7-regression fix: a column is a CONTENT column of a
+                      # band when at least this fraction of its rows is
+                      # non-blank (G < BLANK_G).
+X_OUT_MAX = 0.03      # gen7-regression fix: a line-derived extent is only
+                      # trusted when at most this fraction of the band's
+                      # content columns falls OUTSIDE it -- interior art
+                      # edges qualify as v-border lines (002 y78891: lines
+                      # x353/x651 pass MIN_XSPAN while art spans x0-689 ->
+                      # 73k content px gutter-treated = the panel-erasure
+                      # class; same mechanism cut captions at 002 y93758,
+                      # 001 y74347/y79851). Measured on gold001+gold002:
+                      # healthy extents have <= 1% content outside, every
+                      # damaged band >= 5% -- bimodal at the bar.
 
 
 @dataclass
@@ -158,15 +171,28 @@ def chapter_lines(rgb: np.ndarray):
     return hb, vb
 
 
-def _x_extent(vb, y0: int, y1: int, W: int):
-    """Panel x-extent from v border lines overlapping [y0,y1) substantially."""
+def _x_extent(vb, y0: int, y1: int, W: int, g: np.ndarray | None = None):
+    """Panel x-extent from v border lines overlapping [y0,y1) substantially.
+    The extent must be wide enough (MIN_XSPAN, fix-3b) AND corroborated by
+    the band's own content columns (X_OUT_MAX, gen7-regression fix): border
+    lines BOUND a panel's art, so content outside the extent proves the
+    lines are interior art edges, not the bounding borders -> full width
+    (keep-side default). `g` is the chapter G channel; None skips the
+    content check (compatibility)."""
     vv = [ln for ln in vb
           if min(ln.span[1], y1) - max(ln.span[0], y0) >= 0.6 * (y1 - y0)]
     if len(vv) >= 2:
         x0 = min(ln.pos for ln in vv)
         x1 = max(ln.pos + max(1, ln.thick) for ln in vv)
         if x1 - x0 >= MIN_XSPAN:  # fix-3b: two-sided evidence required
-            return x0, x1
+            if g is None:
+                return x0, x1
+            cols = (g[y0:y1] < BLANK_G).mean(axis=0) > X_COL_CONTENT
+            n_all = int(cols.sum())
+            outside = cols.copy()
+            outside[x0:x1] = False
+            if n_all == 0 or int(outside.sum()) / n_all <= X_OUT_MAX:
+                return x0, x1
     return 0, W
 
 
@@ -182,6 +208,7 @@ def segment_chapter(rgb: np.ndarray) -> list[Segment]:
     the A1 rule) from floating side; no lines = borderless."""
     H, W = rgb.shape[:2]
     rb = _row_blankness(rgb)
+    g_chan = rgb[..., 1]
     hb, vb = chapter_lines(rgb)
     h_pos = sorted(ln.pos for ln in hb)
     # far edges of ALL inventory entries (any thickness): the A1 evidence -- an
@@ -255,7 +282,7 @@ def segment_chapter(rgb: np.ndarray) -> list[Segment]:
                     fe = [e for e in far_edges if a < e <= b]
                     if fe and b - max(fe) >= MIN_CONTENT:
                         cut = max(fe)
-                        x0, x1 = _x_extent(vb, a, cut, W)
+                        x0, x1 = _x_extent(vb, a, cut, W, g_chan)
                         segs.append(Segment("partial", a, cut, x0, x1))
                         segs.append(Segment("borderless", cut, b, 0, W))
                         continue
@@ -264,10 +291,10 @@ def segment_chapter(rgb: np.ndarray) -> list[Segment]:
                     if te and min(te) - a >= MIN_CONTENT:
                         cut = min(te)
                         segs.append(Segment("borderless", a, cut, 0, W))
-                        x0, x1 = _x_extent(vb, cut, b, W)
+                        x0, x1 = _x_extent(vb, cut, b, W, g_chan)
                         segs.append(Segment("partial", cut, b, x0, x1))
                         continue
-            x0, x1 = _x_extent(vb, a, b, W)
+            x0, x1 = _x_extent(vb, a, b, W, g_chan)
             segs.append(Segment(kind, a, b, x0, x1))
     # coalesce any adjacent gutters produced by interval classification
     out: list[Segment] = []

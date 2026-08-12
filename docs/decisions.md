@@ -1779,3 +1779,41 @@ the audit's classification). 8.11.1 reference-rect reproduction re-run with
 the new rule: ALL 6 refs still reproduce their annotated FRAME_RECTS.
 (Ref npz cache path note: .tmp/sfx_decode -> .tmp/gen8/sfx_decode symlink
 restored after the scratch reorganization; suite code untouched.)
+
+## Gen7-vs-gen8 investigation: gen7 measured BETTER on gold (FPink 0 vs 51k/22k); flagged classes root-caused to uncorroborated x-extents; extent-content corroboration implemented, attempt 1 SUCCESS (2026-08-12 10:35 EEST)
+
+Comparison (established metrics, gold001/gold002 flat cleans re-verified
+panel-safe 0.00%/0.07%): gen7 = clean_page_v10 windowed at 2000 rows (byte-
+identical to a13c777, proven via temporary worktree, removed after; the
+current module IS gen7). RESULTS: gen7 FPink 0 / FPmid 767 (gold001) and
+0 / 535 (gold002) vs gen8-testing 50,753 / 96,094 and 21,961 / 114,614;
+FN-ink ~tied (759,832 vs 756,962; 699,772 vs 659,221); gen7 FN-white LOWER.
+The user's hypothesis CONFIRMED: gen8's composition was net-negative vs gen7
+on the gold set. Structural reason: gen8 gutter treatment is DEFAULT-DELETE
+(every keep-rule miss = content damage), gen7 is DEFAULT-KEEP (every miss =
+under-delete only).
+
+Flagged classes, both = ONE local root cause (single-classifier, not
+authority conflict; the fix-2-style site-conflict hypothesis measured NO --
+only 3.8k of 137k damage px in site bboxes): line-derived x-extents built
+from real-but-INTERIOR art edges. 002 y78891-79246: v-lines x353/x651 pass
+MIN_XSPAN (width 314) while band content spans x0-689 -> 73k px (54% of
+content cols outside extent) = the PANEL-ERASURE crops; same mechanism cut
+captions at 002 y93758 and 001 y74347/y79851/y79899 (11% outside).
+Measured distribution: healthy extents <= 1% content cols outside, damaged
+>= 5% -- bimodal.
+
+FIX (one variable, panel_segmentation._x_extent): the extent must be
+corroborated by the band's content columns -- more than X_OUT_MAX=0.03 of
+content cols outside -> full width (keep-side default); X_COL_CONTENT=0.10
+defines a content column. After: flagged instances 0 FP content; gold002
+FPink 21,961 -> 9,797, FPmid 114,614 -> 48,143; gold001 FPink -> 44,657;
+FN-ink +1k (widened bands). No uncorroborated extents survive on either
+chapter; FRAME_RECTS reproduction ALL PASS; 6-ref suite unchanged,
+frame-loss 0; battery gate run (identical -- see log).
+
+Remaining gen7 gap (gold001 44.7k / gold002 9.8k FPink) is scattered
+sparse-band content BELOW CONTENT_DENSE -- the default-delete asymmetry
+itself. Architectural PROPOSAL (not implemented, user decision): in sparse
+content bands, gutter treatment should require positive background evidence
+instead of default-delete. Recorded in the investigation report.
