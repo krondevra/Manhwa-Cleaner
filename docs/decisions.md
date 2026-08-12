@@ -1216,3 +1216,33 @@ y23415-24188 / y51457-52382 / y91980-92825) -- accounting is source-vs-output
 with the established ink/midtone/blank conventions, flagged no-GT.
 Recommendation: FIX family = caption text-line keep (protect glyph bbox rows
 incl. anti-aliased skirt) -- same family as the 8.12.3 "tinting" side note.
+
+## Diagnostic round (case B): torn white rectangles at spiky sites -- site action resurrects gutter blank inside its bbox; GT-quantified FN 24-27% at the 002 etalon sites (2026-08-12 08:53 EEST)
+
+Symptom: kept white RECTANGLES with torn red interior contours at gutter spiky
+bubbles (004 sites y71625-71964, y76251-76586; milder at y65914, y67453).
+Detection is CORRECT (sites = production-equivalent lists; the spiky edge is
+legitimate source style). The defect is composition-context: the production
+site action `clean_spiky_region(_clipped)` wholesale-keeps sealed interiors +
+protected px inside its bbox and CLEARS prior deletions there (validated
+panel-context semantics, 12-instance suite). In GUTTER context this resurrects
+blank the pass-1 gutter treatment had correctly deleted. Stage attribution
+measured at site y71625: pass-1+rc had deleted 87,458 blank px inside the
+bbox; the site action cleared 82,670 of them (added only 5,812 fringe px) ->
+the visible white rectangle IS the bbox (blank kept 94.4% inside vs 36.7% in a
+24px outside collar; site y76251: 88.0% vs 45.1%).
+
+GT quantification (etalon PSD crops 002_5_y66008 / 002_6_y67551, full-width at
+exactly the named offsets, established dual-denominator metrics, DARK_G=100):
+FP-delete 0.092% / 0.117% white-only (fine, we exceed the manual clean almost
+nowhere) but FN-delete 27.357% / 23.969% white-only (98,015 / 68,939 px): the
+manual reference deletes EVERYTHING outside a smooth ellipse -- the expected
+output is a clean soft-rounded balloon, not a spiky remnant in a kept box.
+
+Family: NOT the Class-B occlusion-leak residual (leak under occluding art in
+panel context); this is a new composition-seam family. Owner:
+clean_chapter_full step 3 (sfx.py) applying the panel-context action in gutter
+context; profiles/spiky_cloud.py and pipeline.py themselves unchanged-correct.
+Recommendation: FIX in composition (site action must not clear pass-1 gutter
+deletions outside the sealed bubble interior; optionally delete the full spike
+zone in gutter context to match the manual reference). No code changed here.
