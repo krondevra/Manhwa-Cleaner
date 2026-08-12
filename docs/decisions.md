@@ -1741,3 +1741,22 @@ production fringe deletion was itself chapter-scale FP vs this GT), FPmid
 gold001 FPink 144,073 -> 131,126. FNw +0.3-0.4pp (kept silhouette blank the
 manual black-fills -- style-recoverable). All 13 sites classified
 gutter-context on these chapters; 12-instance suite path untouched.
+
+## Fix 3a (case C, sub-cause 1): CONTENT_DENSE midtone-aware borderless typing -- 1.65M content px recovered across both chapters, attempts A1+A2 SUCCESS (2026-08-12 09:47 EEST)
+
+One variable: clean_chapter's borderless keep rule becomes
+`ink >= DENSE_INK or content_frac(G < BLANK_G) >= CONTENT_DENSE`. Measured
+distributions on the gold chapters first: 166 GT-KEEP borderless bands vs 6
+GT-DELETE (two recurring credit templates, two tail-credit bands, one
+92-row grayscale pale texture, one header strip). A1 at 0.25: +1.52M
+recovered / 62k FN (the pale-texture band is the entire cost). A2 at 0.20:
++133k more at +4.5k FN (30:1), catching the y65539 silhouette band (cfrac
+0.234, ink 0.029 -- the case-C class instance). Below 0.20 the marginal
+ratio collapses to ~3:1; under-keep-preferred stops there.
+
+After fix1+2+3a vs baseline, whole-chapter content FP:
+gold001 148,255 ink + 876,900 mid -> 50,753 + 96,094;
+gold002 150,757 ink + 930,361 mid -> 73,662 + 374,623.
+FN-ink flat (+2k). Silhouette probe FPmid 39,647 -> 5,277 (residue: a
+33-row cfrac-0.186 fragment of the figure + gutter-typed slices -- noted,
+not chased, per the measured ratio collapse). _x_extent untouched (3b).

@@ -80,6 +80,18 @@ EDGE_MARGIN = 3        # lines within this of the canvas edge are crop artifacts
 GUARD_STATS = {"zero_line": 0, "blank_evidence": 0, "inversion": 0}
 DENSE_INK = 0.15   # 8.11.2: borderless segment ink density at or above this =
                    # full-bleed art island, kept wholesale in clean_chapter
+CONTENT_DENSE = 0.20  # fix-3a (case C): borderless bands are ALSO kept when
+                      # their CONTENT fraction (G < BLANK_G) reaches this --
+                      # light-skin / white-clothing art is midtone, not ink
+                      # (the y65368 silhouette band measured ink 0.029), and
+                      # the ink-only rule fed it to gutter treatment. Measured
+                      # on the gold001/gold002 manual cleans: 0.25 recovers
+                      # 1.52M wrongly-deleted content px at an FN cost of 62k
+                      # (one 92-row grayscale pale-texture band, gold002
+                      # y82920); the A2 step to 0.20 recovers another 133k at
+                      # +4.5k FN (30:1) and catches the y65539 silhouette
+                      # band (cfrac 0.234). Below 0.20 the ratio collapses to
+                      # ~3:1 -- under-keep-preferred stops there.
 RC_KEEP_INK_MIN = 0.01  # 8.12.4: a regular_cloud keep must have at least this
                         # INTERIOR ink fraction (G < 100) or it protects an
                         # empty hole (whited-out translation caption boxes,
@@ -368,7 +380,8 @@ def clean_chapter(rgb: np.ndarray, verbose: bool = False):
             keep_all[s.y0:s.y1, s.x0:s.x1] = True
         elif s.kind == "borderless":
             ink = float((g[s.y0:s.y1] < 100).mean())
-            if ink >= DENSE_INK:
+            content = float((g[s.y0:s.y1] < BLANK_G).mean())
+            if ink >= DENSE_INK or content >= CONTENT_DENSE:
                 keep_all[s.y0:s.y1] = True
     delete = np.zeros((H, W), bool)
     stats = {"units": len(units), "processed": 0, "skipped_kept": 0}
