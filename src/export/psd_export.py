@@ -12,13 +12,18 @@ a REAL merged composite (the base art), at 30,000-row parts (the v1 spec
 cap): `<chapter>_touchup-N.psd` with layers (bottom-up):
 
   base              original art, visible
-  pipeline_result   white px + alpha where the automatic delete mask fires
-  wall1_semantic .. wall6_pale   white + alpha candidate masks, hidden
+  pipeline_result   BLACK marks on white, multiply blend, hidden
+  wall1_semantic .. wall6_pale   same convention, hidden
 
-wall:1 is px-precise (the measured honest-negative fragment rule recomputed
-from delete.npy + rgb); walls 2-6 are bbox fills from zones.json. Toggle a
-layer to see its flags over the art; Ctrl-click its thumbnail in Photopea to
-load the alpha as a selection; paint into it to adjust.
+Mask-layer format = the user's OWN mask-hard convention (their new-gold
+PSDs): full-canvas opaque RGB bitmaps, black = flagged, white = untouched,
+blend mode MULTIPLY (white is neutral, black marks show over the art when
+the layer is toggled visible). No transparency channel -- the first
+white+alpha attempt rendered in Photopea as black raster masks (the
+transparency channel was presented as a layer mask). wall:1 is px-precise;
+walls 2-6 are bbox fills from zones.json. Select flags in Photopea via
+magic wand / Select > Color Range on the mask layer; paint black/white to
+adjust.
 
 Writer: pytoshop 1.2.1 with py3.14/numpy2 compatibility shims (see
 _shim_pytoshop): negative constant-channel scalars, the missing `packbits`
@@ -120,17 +125,16 @@ def export_chapter(chapter_png: str | Path, sidecar_dir: str | Path,
         y1 = min(H, y0 + PART_ROWS)
 
         def mask_layer(lname, m):
-            a = (m[y0:y1] * np.uint8(255))
-            if not a.any():
-                # a wholly-empty layer is dropped by the writer; plant one
-                # 1/255-alpha corner px so every part carries the SAME layer
-                # set (Photopea layer-panel consistency)
-                a = a.copy()
-                a[0, 0] = 1
-            w = np.full(a.shape, 255, np.uint8)
+            # user's mask-hard convention: black marks on white, multiply
+            g = np.full(m[y0:y1].shape, 255, np.uint8)
+            g[m[y0:y1]] = 0
+            if (g == 255).all():
+                g[0, 0] = 254   # writer drops constant layers; keep the set
+            g = np.ascontiguousarray(g)
             return nested_layers.Image(
                 name=lname, visible=False,
-                channels={0: w, 1: w, 2: w, -1: np.ascontiguousarray(a)})
+                blend_mode=enums.BlendMode.multiply,
+                channels={0: g, 1: g, 2: g})
 
         layers = [mask_layer(WALL_LAYERS[c], walls[c])
                   for c in sorted(WALL_LAYERS, reverse=True)]
@@ -193,15 +197,17 @@ def verify_roundtrip(chapter_png: str | Path, sidecar_dir: str | Path,
                 if not np.array_equal(got, rgb[y0:y1]):
                     print(f"  {path.name}/base: PIXELS DIFFER"); ok = False
             else:
-                a = (arr[..., -1] * 255).round().astype(np.uint8) > 127
-                # the planted 1/255 corner px thresholds to False -- no
-                # special-casing needed
+                g = (arr[..., 0] * 255).round().astype(np.uint8)
+                marks = g < 128   # planted 254 px thresholds to False
                 ref = delete[y0:y1] if l.name == "pipeline_result" else \
                     walls[[k for k, v in WALL_LAYERS.items()
                            if v == l.name][0]][y0:y1]
-                if not np.array_equal(a, ref):
-                    d = int((a != ref).sum())
-                    print(f"  {path.name}/{l.name}: ALPHA DIFFERS {d} px")
+                if not np.array_equal(marks, ref):
+                    d = int((marks != ref).sum())
+                    print(f"  {path.name}/{l.name}: MARKS DIFFER {d} px")
+                    ok = False
+                if l.blend_mode.name.lower() != "multiply":
+                    print(f"  {path.name}/{l.name}: blend {l.blend_mode}")
                     ok = False
         print(f"  {path.name}: OK" if ok else f"  {path.name}: FAIL")
     return ok
