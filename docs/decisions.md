@@ -1246,3 +1246,36 @@ context; profiles/spiky_cloud.py and pipeline.py themselves unchanged-correct.
 Recommendation: FIX in composition (site action must not clear pass-1 gutter
 deletions outside the sealed bubble interior; optionally delete the full spike
 zone in gutter context to match the manual reference). No code changed here.
+
+## Diagnostic round (case C): silhouette contour-on-red + sliver-panel band -- content-bearing bands under gutter treatment; adversarial guard blind spot MEASURED (2026-08-12 08:53 EEST)
+
+Symptom: thin double-line contour along a character's jaw/forearm (y65230-
+65650) rendered on red. frame.py CLEARED: chapter_lines uses the morphological
+inventory (detect_lines_morph, not the Hough path), and the only entries in
+the window are real edges (h y65242 span 58-658; v x657 span y65241-65767) --
+nothing traces the curved silhouette. Actual mechanism: the artwork band
+y65368-65643 measures ink 0.029 vs DENSE_INK 0.15 (light skin / white shirt
+art is MIDTONE, not ink) -> typed sparse-borderless -> gutter treatment:
+73.7% of the window's midtone px and 20.4% of its ink px deleted; the kept
+sfx_glyph outline strokes + their 2/4px Expand halo read as a double line.
+Same family as case A (content in a gutter-treated band; keeps are stroke-
+granular), distinct sub-cause (DENSE_INK misses midtone-dominant art).
+
+Second instance, WORSE: band y78096-78700 typed panel with x-extent 642-663 --
+_x_extent collapsed onto a 5-line v-cluster at x642-661 (the diagonal panel's
+right border decoration; no left border exists), the known x-band-collapse
+family recurring at SEGMENT-TYPING level (B1 fixed it at unit level only).
+The band's content outside the sliver: 100,966 px deleted incl. 5,650 ink +
+75,504 midtone (face/hair/background art visibly eaten in the render).
+
+GUARD REVISION (honesty item): the chapter adversarial guard counts deletions
+inside SEGMENTATION'S OWN panel/partial rects -- inside the 21px sliver it
+correctly measures 0, while the 100,966 px next to it are structurally
+invisible. The 8.11.2/8.12.1 "0 adversarial px" claims remain true as
+specified but are WEAKER than previously presented: the guard cannot see
+segmentation typing errors. Distinct from the Broken-ring class (ring broken
+by art overlap; here the ring never existed on the left side).
+Owner: panel_segmentation.py (_x_extent collapse; DENSE_INK typing) +
+sfx.py keep granularity. No PSD GT in window (flagged). Recommendation: FIX
+(guard should also bound content-px deletion per band; _x_extent needs
+two-SIDED line evidence; DENSE_INK needs a midtone-aware art criterion).
