@@ -1636,3 +1636,31 @@ initial (2).psd"): full 5-layer stack, all three masks strictly binary
 corner-collapse Levels) reproduces the Rec.709 reference math exactly,
 as predicted by simulation. Script: .tmp/gen9/script-diagnostic/
 gen9-v2-setup.jsx (v4) + Desktop copy gen9-v2-setup-v4.jsx.
+
+## Fix-pass step 0: new-gold GT decoded -- the PSD mask layers are threshold templates, the REAL reference clean is .tmp/saved/chapters/*_cleaned.png (2026-08-12 09:16 EEST)
+
+On testing (ff to main 8244233). The brief pointed at .tmp/saved/psd/new-gold/
+part-PSDs (001-1..3, 002-1..3, canvas 690x50000 each; chapter 033 set also
+present, out of scope). Decoded, MEASURED, not assumed:
+
+- Naming: new-gold "001" = the 143,026-row chapter stored as
+  .tmp/saved/chapters/001.png (merged/002.png is a pale-normalized copy of it
+  with 107 extra tail rows -- rows match at delta 0); new-gold "002" =
+  .tmp/saved/chapters/002.png, byte-identical to .tmp/eval/002.png.
+- The PSD layers red/img/mask-hard/mask-soft: img ~= source (pale-normalized,
+  mean|d| 24 on scattered near-white px); mask-hard/mask-soft are FULL-CANVAS
+  black/white threshold-template bitmaps that cover 85% of ALL chapter ink
+  INCLUDING panel characters (uncurated residue), with limited hand curation
+  (rect blocks over caption bands, erasure holes over bubble text). They are
+  NOT a per-pixel reference clean; treating their union as GT would call
+  panel-interior art "to delete". Rejected as GT after measurement.
+- The AUTHORITATIVE GT: .tmp/saved/chapters/{001,002}_cleaned.png flat manual
+  cleans (same sizes as sources). Verified semantics: whole-chapter delete
+  36.1% (gold002), chapter ink deleted only 3.4%, panel interiors untouched
+  (0%), captions KEPT (1% ink deleted -- exactly the Fix-1 target), UI cards
+  KEPT, gutter bubbles kept with spikes/surround deleted. This matches the
+  fix-pass brief's stated targets; the mask-layer contradiction dissolved.
+- GT delete mask = any-channel diff(source, cleaned). Metric subtlety: blank
+  white deleted-to-white is invisible in this GT -- FP/FN see content px
+  only; blank handling is metric-neutral. Established dual-denominator
+  conventions (DARK_G=100 white-only + total) reused via the fixpass harness.
