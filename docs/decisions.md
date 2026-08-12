@@ -1693,3 +1693,23 @@ fraction of the band's CONTENT px (source G<200); measured healthy bands
 delete only stroke-level content (SFX) while damaged bands delete 20-240k
 content px, so a measured threshold separates them; bands over the bound
 degrade to no-op (the standing degrade-to-nothing principle).
+
+## Fix 1 (case A): text-skirt rescue in clean_chapter_full -- caption erosion to ZERO on all gold002 captions, attempt 1-A1 SUCCESS (2026-08-12 09:25 EEST)
+
+Composition-level (clean_chapter_full LAST step; clean_sfx_region and the
+6-ref suite path untouched, same placement pattern as the 8.12.4 filter):
+un-delete content components (G < BLANK_G) with >= TEXT_SEED_FRAC=0.15 of
+themselves already kept (the surviving dark core proves text/stroke) and area
+<= TEXT_COMP_MAX=2000 (text-scale; large pale art is fix-3a's domain); spiky
+site bboxes excluded (site-action authority preserved).
+
+Parameters from a measured sweep vs the .tmp/saved/chapters GT (not guessed):
+without the cap the rescue wrongly keeps 147k px of SFX skirt (gold002); with
+(0.15, 2000): caption bands FPink/FPmid 507+467 / 695+617 -> 0/0 on ALL
+three gold002 captions (target was ~1%, the cap5 counter-instance);
+whole-chapter FP content down 5.4k (gold002) / 4.2k (gold001) px; FN-ink
++16 / +79 px -- the added FN is 3.5k components of max 69 px (anti-aliased
+specks). Site probe metrics bit-identical. text_rescued_px stat added
+(19,158 / 8,116). Honest note: caption-band FNw rises a few pp because the
+manual clean trims glyph skirts slightly tighter than the full component we
+keep -- over-keep at glyph-skirt scale, the reading direction of the fix.

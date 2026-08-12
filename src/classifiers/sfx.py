@@ -90,6 +90,18 @@ RC_KEEP_INK_MIN = 0.01  # 8.12.4: a regular_cloud keep must have at least this
                         # interiors measure ~0 (empty) vs >= 5.9% (real text
                         # bubbles) on the 80 measured chapter regions.
 RC_INSET_FRAC = 0.12    # inset = max(6 px, this fraction of the smaller dim)
+TEXT_SEED_FRAC = 0.15   # fix-1 (case A): a content component (G < BLANK_G) is
+                        # rescued from deletion when at least this fraction of
+                        # it is already kept (its dark glyph core survives
+                        # pass-1) -- the kept core proves it is a text/stroke
+                        # structure whose anti-aliased skirt pass-1 eroded
+                        # (measured caption erosion 13-17% ink / up to 65%
+                        # midtone; with the rescue: 0 on all gold002 captions).
+TEXT_COMP_MAX = 2000    # ... and the component is text-scale. Large pale art
+                        # components must NOT ride in (they are fix-3a's
+                        # domain); measured sweep: without the cap the rescue
+                        # adds 147k px of wrongly-kept SFX skirt (gold002),
+                        # with it 8.7k px of sub-70px specks.
 
 
 def _border_lines(rgb: np.ndarray):
@@ -359,6 +371,37 @@ def clean_chapter(rgb: np.ndarray, verbose: bool = False):
     return delete, stats
 
 
+def _text_skirt_rescue(rgb: np.ndarray, delete: np.ndarray,
+                       sites: list) -> np.ndarray:
+    """Fix-1 (case A, composition policy): un-delete text-scale content
+    components whose dark core already survives -- pass-1 erodes the
+    anti-aliased skirt and the G 33-99 strokes of translated caption glyphs
+    (measured 13-17% ink / up to 65% midtone per caption), leaving broken
+    text. A component G < BLANK_G with >= TEXT_SEED_FRAC of itself kept and
+    area <= TEXT_COMP_MAX is such a glyph; spiky site bboxes are excluded
+    (the site action is the sole authority there). Returns px to un-delete."""
+    content = rgb[..., 1] < BLANK_G
+    kept = content & ~delete
+    num, lab, stats, _ = cv2.connectedComponentsWithStats(
+        content.astype(np.uint8), connectivity=8)
+    insite = np.zeros(delete.shape, bool)
+    for (sx0, sy0, sx1, sy1) in sites:
+        insite[sy0:sy1, sx0:sx1] = True
+    areas = stats[:, cv2.CC_STAT_AREA]
+    kept_counts = np.bincount(lab[kept], minlength=num)
+    del_counts = np.bincount(lab[content & delete], minlength=num)
+    site_counts = np.bincount(lab[insite & content], minlength=num)
+    admit = np.zeros(num, bool)
+    for i in range(1, num):
+        if areas[i] > TEXT_COMP_MAX or del_counts[i] == 0:
+            continue
+        if site_counts[i] > 0.2 * areas[i]:
+            continue
+        if kept_counts[i] / areas[i] >= TEXT_SEED_FRAC:
+            admit[i] = True
+    return admit[lab] & delete
+
+
 def clean_chapter_full(rgb: np.ndarray, verbose: bool = False):
     """Gen-8 FULL ORCHESTRATION (8.12.1): every gen-8 classifier composed into
     one chapter-scale delete decision. Reference architecture -- see
@@ -452,6 +495,12 @@ def clean_chapter_full(rgb: np.ndarray, verbose: bool = False):
         delete = spiky_pipeline.clean_spiky_region_clipped(
             rgb, delete, bbox, protected=prot)
     stats["spiky_deleted_px"] = int((delete & ~before).sum())
+
+    # fix-1 (case A): text-skirt rescue, LAST -- runs on the final mask so the
+    # site actions' decisions stand (their bboxes are excluded inside).
+    rescued = _text_skirt_rescue(rgb, delete, sites)
+    stats["text_rescued_px"] = int(rescued.sum())
+    delete &= ~rescued
     if verbose:
         print(f"clean_chapter_full: {stats}")
     return delete, stats
