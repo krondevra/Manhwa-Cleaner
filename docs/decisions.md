@@ -1279,3 +1279,63 @@ Owner: panel_segmentation.py (_x_extent collapse; DENSE_INK typing) +
 sfx.py keep granularity. No PSD GT in window (flagged). Recommendation: FIX
 (guard should also bound content-px deletion per band; _x_extent needs
 two-SIDED line evidence; DENSE_INK needs a midtone-aware art criterion).
+
+## GEN 9 OPENED: port of the user's manually-perfected Photopea algorithm; two-classifier scope (2026-08-13 16:17 EEST)
+
+Why a new generation: the gen7-vs-gen8 comparative investigation (testing
+branch, b8c21f5) measured gen7's monolithic pipeline at FPink 0/0 on both
+golds while gen8's classifier composition, even post-fixpass, held thousands
+(gold001 27,576 / gold002 7,231). Gen8's failure mode was never one wrong
+classifier -- it was independently-reasonable classifiers conflicting at
+composition boundaries (authority ordering, extent collapse, default-delete
+bias). Gen9 abandons that architecture.
+
+Foundation: the user's new manual Photopea algorithm (.tmp/gen9/
+new-pipeline.md), hand-tuned to parameter precision (Levels 33,1,34 --
+38,1,39 and 51,1,52 tried and rejected; Threshold 226; Levels 248,1,249;
+Threshold 178; Minimum/Maximum 1px). It is deterministic except exactly two
+operator judgment calls: WHICH white regions are inter-frame background
+(step 11 clicks), and WHICH glyph strokes at the frame/background boundary
+get the select-expand(4px)-delete treatment (step 15 clicks). Gen9 = port
+the deterministic part parameter-for-parameter + build exactly those two
+classifiers (A: background selection, B: boundary-glyph selection), narrowly
+scoped, no composition machinery. A third judgment call, if ever needed, is
+a STOP-and-report, not a silent addition.
+
+Plan-mode measurements against the user's own working PSD
+(.tmp/gen9/002_1.psd: red / img+raster-mask / img-clone-1 / img-clone-2):
+- GT self-consistent: img mask black == semi-etalon alpha transparent,
+  100.0% agreement, 10,434,032 px (50.4% of the 690x30000 page). The
+  workflow deletes the background FIELD (72.8% of blank) while touching
+  only 1.3% of ink / 0.7% of midtone.
+- Deterministic chain reproduced pixel-exact in read-only probes:
+  clone-1 = Levels(33,1,34) per-channel -> Threshold(226) on Rec.709
+  luminosity, 100.0% vs the PSD's own layer; clone-2 = Levels(248,1,249)
+  -> Threshold(178) -> erode3x3 -> dilate3x3, 100.0%.
+- POLARITY DISCREPANCY, file is authoritative: the written steps 20-30
+  as literally read would delete panels; the final mask instead decodes as
+  DELETE = dilate1_sq3(union of selected clone-2-white background comps)
+  AND NOT clone1-black, plus 11 manual expand-4 SFX fills -- i.e. the
+  fills in the notes are protective (mask built in inverted polarity).
+  This formula reproduces GT at diff 17,194 px = 0.08% of the page before
+  any classifier.
+- Classifier A's GT here: of 1,165 clone-2-white components, exactly the
+  14 FULL-WIDTH bands are deleted; 15 one-side edge slivers and all 1,141
+  panel-interior whites kept; header block y<160 (margin + site banner)
+  kept by operator convention. No sealed-pocket positives on this page --
+  the user's ~50px thick-contour heuristic ships report-only, not tuned
+  blind.
+- Classifier B's GT here: 6 stroke groups >= 50 px (y2742-4504, y24261),
+  glyphs crossing the frame border, deleted with ~4px expansion. User
+  ruling (2026-08-13): the semi-etalon is UNDER-CLICKED -- B must recover
+  these 6, and additional confident detections are reported as
+  beyond-etalon candidates, not counted as FP.
+
+Branch gen9 off main (8244233); code lives in src/gen9/ only; gen7/gen8
+files and production defaults untouched; versioning 9.XX.YY; no merge
+without user review. Success metric: end-to-end px-diff vs the PSD mask
+as close to the 0.08% oracle ceiling as the classifiers allow, with the
+established content-FP (ink G<100 / midtone 100-199) and FN metrics,
+full-page only. Expected defect classes explicitly NOT chased this pass:
+MinMax square-kernel steps on curves, spiky-cloud residue floating in the
+cleaned field, dark/UI zones (flag and skip).
