@@ -1339,3 +1339,38 @@ established content-FP (ink G<100 / midtone 100-199) and FN metrics,
 full-page only. Expected defect classes explicitly NOT chased this pass:
 MinMax square-kernel steps on curves, spiky-cloud residue floating in the
 cleaned field, dark/UI zones (flag and skip).
+
+## GEN 9 DELIVERED: end-to-end port FN 0 / diff 0.087% page; A first-try 14/14, B decodes fills as sealed pockets 6/6 (+19 beyond-etalon) (2026-08-13 16:32 EEST)
+
+9.01.00 (fdee008): deterministic chain pixel-exact vs the user's own PSD
+intermediates -- clone-1 100.0% (Rec.709 lum), clone-2 100.0% (Rec.601
+after Min/Max; the 3x3 pass washes out the weighting difference, the
+empirically exact pair is pinned). Oracle ceiling (formula + the user's
+exact selections): diff 13,087 px = 0.063% page, FP-ink 431, FN-ink 0.
+
+9.02.00 (6bc3085): Classifier A = full-width-span rule + keep-top-band
+(header/banner) convention. 14/14 GT selections, 0/15 edge slivers,
+0/1,141 panel whites, first attempt. Sealed-pocket finder REPORT-ONLY
+(no GT positives on 002_1; 2 candidates, 48/56 px).
+
+9.03.00 (1451085): Classifier B -- measurement overturned the assumed
+semantics: ALL six operator step-15 fills are SEALED BACKGROUND POCKETS
+(0% stroke px, 77-95% clone-2-white; strokes stay via c1b protection),
+not stroke deletions. Hole-topology discriminators failed (4/6 pockets
+share panel holes -- the gen8 mega-component lesson recurring); the
+user's thickness heuristic works at OBJECT level: compact (bbox<=250) +
+thick (inscribed r>=3.0) ink comps in the 25px near-bg band = glyph
+objects; their sealed pockets (area 30-3000, dist-to-bg 3-30px) join the
+background selection in compose_delete. 6/6 GT + 19 beyond-etalon
+candidates (user pre-ruled the semi-etalon under-clicked; all 19
+visually verified as glyph text pockets, blue-boxed in the preview).
+
+9.04.00: run.py end-to-end on 002_1: FN 0 (every manually-deleted px is
+deleted), total diff 18,018 px = 0.087% page (3,853 = the 19 extras,
+~14k = ring AA vs soft selection edge), FP-ink 755 / FP-mid 2,317.
+Known defects reported not chased: MinMax square-kernel steps, floating
+SFX residue 21,650 px / 1,801 fragments, dark/UI none seen. Constants
+single-page-validated; 50px pocket proximity remains user estimate.
+Confirmation: exactly two classifiers, no authority machinery. Report:
+notes/reports/gen9_port_2026-08-13_report.md. Desktop previews delivered.
+User gates: review of red preview (esp. the 19 blue-boxed extras).
