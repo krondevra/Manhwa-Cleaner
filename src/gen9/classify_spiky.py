@@ -23,12 +23,18 @@ import cv2
 import numpy as np
 
 INTERIOR_MIN = 10000     # spiky interiors are big (GT 48,318)
+HALO_R = 15              # S6 halo zone: dilate of ring (missed 0 at 15)
+HALO_TOL = 120           # wand tol 120 vs white -> min channel >= 135
+HALO_QUAL = 255 - HALO_TOL
+HALO_SAT = 24            # neutral guard (halo is white/gray; tinted
+                         # panel px under the lower spikes are frame)
 BAND_IN = 10             # annulus: dilate(interior) radius 10..25
 BAND_OUT = 25
 CROSSINGS_MIN = 100      # spike-fragment count threshold (259 vs <=29)
 RING_REACH = 25          # SFX-black comps within this of interior = ring
 RECT_PAD = 20            # padded working rectangle around ring+interior
 FULL_WIDTH_SLACK = 2
+SQ3 = np.ones((3, 3), np.uint8)
 
 
 def find_spiky(cf: np.ndarray, sfx: np.ndarray, bg_selected: np.ndarray,
@@ -84,3 +90,42 @@ def find_spiky(cf: np.ndarray, sfx: np.ndarray, bg_selected: np.ndarray,
         out.append(dict(comp_id=i, interior=interior, ring=ring, rect=rect,
                         crossings=score))
     return out
+
+
+def fill_holes(mask: np.ndarray) -> np.ndarray:
+    u = mask.astype(np.uint8)
+    n, lab = cv2.connectedComponents((u == 0).astype(np.uint8),
+                                     connectivity=4)
+    border = np.unique(np.r_[lab[0, :], lab[-1, :], lab[:, 0], lab[:, -1]])
+    return mask | (~np.isin(lab, border) & (u == 0))
+
+
+def spiky_zone(cloud: dict, cf_labels: np.ndarray, cf_stats: np.ndarray,
+               selected_ids: list[int]) -> np.ndarray:
+    """S6 working zone: halo band around the ring + the interior with its
+    text region filled, clipped at the host background band's bottom edge
+    (the part of the cloud over the frame below is locked territory --
+    validated: 0 GT px lost to the clip, 32k saved from over-delete)."""
+    ring, interior = cloud['ring'], cloud['interior']
+    k = np.ones((2 * HALO_R + 1,) * 2, np.uint8)
+    core = fill_holes(cv2.dilate(interior.astype(np.uint8), SQ3).astype(bool))
+    zone = cv2.dilate(ring.astype(np.uint8), k).astype(bool) | core
+    area = cv2.dilate((ring | interior).astype(np.uint8),
+                      np.ones((9, 9), np.uint8)).astype(bool)
+    host, best = None, -1
+    for i in selected_ids:
+        ov = int((area & (cf_labels == i)).sum())
+        if ov > best:
+            host, best = i, ov
+    ymax = int(cf_stats[host, 1] + cf_stats[host, 3]) + 1
+    zone[ymax:] = False
+    return zone
+
+
+def halo_classify(src: np.ndarray, zone: np.ndarray
+                  ) -> tuple[np.ndarray, np.ndarray]:
+    """S6 px rule inside the zone: whitish-neutral = background (delete),
+    everything else = content fringe (restore). Returns (bg, not_bg)."""
+    whitish = (src.min(axis=2) >= HALO_QUAL) & \
+              (src.max(axis=2).astype(int) - src.min(axis=2) < HALO_SAT)
+    return zone & whitish, zone & ~whitish

@@ -57,6 +57,20 @@ HOLE_RATIO_MAX = 1.0      # an SFX outline is more ink than enclosed
 POCKET_MIN = 30
 POCKET_MAX = 8000
 
+# Photopea Select>Modify>Expand>4px == octagon radius 4 (Chebyshev+
+# Manhattan mix). Kernel ladder vs the before-44 delta: octagon/Euclid4.5
+# missed 0 / extra 212; disk9 missed 1,430; sq9 extra 2,221.
+EXPAND4 = np.ones((9, 9), np.uint8)
+for _i in range(9):
+    for _j in range(9):
+        if abs(_i - 4) + abs(_j - 4) > 6:
+            EXPAND4[_i, _j] = 0
+
+
+def expand_fringe(sel_mask: np.ndarray) -> np.ndarray:
+    """S5: the operator's expand-4 halo around selected SFX strokes."""
+    return cv2.dilate(sel_mask.astype(np.uint8), EXPAND4).astype(bool)
+
 
 def _wand_qualifies(src: np.ndarray) -> np.ndarray:
     """Px within WAND_TOL of pure white (Chebyshev over channels)."""
