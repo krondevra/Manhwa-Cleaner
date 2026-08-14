@@ -72,15 +72,24 @@ def find_spiky(cf: np.ndarray, sfx: np.ndarray, bg_selected: np.ndarray,
         reach = np.zeros((H, W), bool)
         reach[ys:ye, xs:xe] = cv2.dilate(
             comp, np.ones((2 * RING_REACH + 1,) * 2, np.uint8)).astype(bool)
-        n2, lab2, st2, _ = cv2.connectedComponentsWithStats(
-            ink.astype(np.uint8), connectivity=8)
+        if not hasattr(find_spiky, '_ink_cc') or \
+                find_spiky._ink_cc[0] is not ink:
+            n2, lab2, st2, _ = cv2.connectedComponentsWithStats(
+                ink.astype(np.uint8), connectivity=8)
+            find_spiky._ink_cc = (ink, n2, lab2, st2)
+        _, n2, lab2, st2 = find_spiky._ink_cc
         ring = np.zeros((H, W), bool)
         for j in range(1, n2):
-            if st2[j, 4] < 500:
+            jx, jy, jw, jh, ja = (int(v) for v in st2[j][:5])
+            if ja < 500:
                 continue
-            cj = lab2 == j
-            if (cj & reach).any() and not (cj & interior).any():
-                ring |= cj
+            # bbox intersect with the reach window first (cheap)
+            if jx >= xe or jy >= ye or jx + jw <= xs or jy + jh <= ys:
+                continue
+            box = lab2[jy:jy + jh, jx:jx + jw] == j
+            if reach[jy:jy + jh, jx:jx + jw][box].any() and \
+                    not interior[jy:jy + jh, jx:jx + jw][box].any():
+                ring[jy:jy + jh, jx:jx + jw] |= box
         area = interior | ring
         ysA, xsA = np.where(area)
         rect = (max(0, int(ysA.min()) - RECT_PAD),

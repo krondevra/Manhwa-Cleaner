@@ -34,7 +34,8 @@ ISLAND_MAX = 120000   # kept comps up to this float in the bg zone
 BAND_R = 16           # near-field writable band (GT speck max dist 12)
 
 
-def run_page(page_png, out_dir=None, keep_top_band=True, src=None):
+def run_page(page_png, out_dir=None, keep_top_band=True, src=None,
+             keep_snaps=True):
     import cv2
 
     from gen9 import classify_bg, classify_sfx, classify_spiky
@@ -49,6 +50,12 @@ def run_page(page_png, out_dir=None, keep_top_band=True, src=None):
 
     report = {}
     snaps = {}
+
+    def snap(name):
+        if keep_snaps:
+            snaps[name] = state.mask.copy()
+        else:
+            snaps[name] = None
 
     # S1 -- deterministic layers
     outl = pl.outlines(src)
@@ -88,7 +95,8 @@ def run_page(page_png, out_dir=None, keep_top_band=True, src=None):
                           rect=c['rect'])
     frame_lock = kept & ~carve
     state.lock_frames(frame_lock)
-    snaps['S2'] = state.mask.copy()
+    field26 = state.mask.copy()   # deleted field at the frame boundary
+    snap('S2')
 
     # S3 -- field-speck compensation --------------------------------------
     spiky_all = np.zeros(src.shape[:2], bool)
@@ -100,10 +108,10 @@ def run_page(page_png, out_dir=None, keep_top_band=True, src=None):
     state.delete(specks, tag='S3-specks')
     report['speck_px'] = int(specks.sum())
     state.verify_locks()
-    snaps['S3'] = state.mask.copy()
+    snap('S3')
 
     # S4 -- trapped pockets (Classifier C; B' selection adjudicates) ------
-    slab, ssel, srows = classify_sfx.select_sfx_comps(sfxl, snaps['S2'], cf)
+    slab, ssel, srows = classify_sfx.select_sfx_comps(sfxl, field26, cf)
     for r in srows:
         state.add_pending(f"sfx-{r['comp_id']}", 'sfx', bbox=r['bbox'])
         if not r['selected']:
@@ -113,7 +121,7 @@ def run_page(page_png, out_dir=None, keep_top_band=True, src=None):
     report['sfx_selected'] = len(ssel)
     report['pockets'] = prows
     state.verify_locks()
-    snaps['S4'] = state.mask.copy()
+    snap('S4')
 
     # S5 -- SFX fringe restore + lock -------------------------------------
     selmask = np.isin(slab, ssel)
@@ -124,7 +132,7 @@ def run_page(page_png, out_dir=None, keep_top_band=True, src=None):
     state.lock_sfx(classify_sfx.expand_fringe(selmask) | pockets)
     report['fringe_px'] = int(fringe.sum())
     state.verify_locks()
-    snaps['S5'] = state.mask.copy()
+    snap('S5')
 
     # S6 -- spiky halo re-classify ----------------------------------------
     for z in zones:
@@ -132,7 +140,7 @@ def run_page(page_png, out_dir=None, keep_top_band=True, src=None):
         state.delete(bg_px & ~state.mask, strict=False, tag='S6-halo-del')
         state.restore(fg_px & state.mask, strict=False, tag='S6-halo-res')
     state.verify_locks()
-    snaps['S6'] = state.mask.copy()
+    snap('S6')
 
     # S7 -- interior restore (expand-1) -----------------------------------
     for c in clouds:
@@ -140,7 +148,7 @@ def run_page(page_png, out_dir=None, keep_top_band=True, src=None):
                          classify_spiky.SQ3).astype(bool)
         state.restore(exp & state.mask, strict=False, tag='S7-interior')
     state.verify_locks()
-    snaps['S7'] = state.mask.copy()
+    snap('S7')
 
     # S8 -- interior hole fill + spiky lock -------------------------------
     for c, z in zip(clouds, zones):
@@ -151,7 +159,7 @@ def run_page(page_png, out_dir=None, keep_top_band=True, src=None):
         state.resolve(f"spiky-{c['comp_id']}", 'halo-deleted-interior-kept')
     state.lock_spiky(spiky_all)
     state.verify_locks()
-    snaps['S8'] = state.mask.copy()
+    snap('S8')
     report['clipped'] = state.clipped_log
     report['deleted_px'] = int(state.mask.sum())
 
@@ -175,5 +183,6 @@ def run_page(page_png, out_dir=None, keep_top_band=True, src=None):
 
 if __name__ == '__main__':
     _, s, rep = run_page(sys.argv[1],
-                         sys.argv[2] if len(sys.argv) > 2 else '.tmp/gen9/out')
+                         sys.argv[2] if len(sys.argv) > 2 else '.tmp/gen9/out',
+                         keep_snaps=False)
     print(rep)

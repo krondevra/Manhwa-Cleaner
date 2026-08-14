@@ -113,17 +113,17 @@ def find_field_specks(src: np.ndarray, deleted: np.ndarray,
         x0, y0, w, h, a = (int(v) for v in st[i][:5])
         if a > SPECK_MAX:
             continue
-        comp = lab == i
-        if not adj[comp].any():
+        ys, xs = max(0, y0 - 3), max(0, x0 - 3)
+        ye, xe = min(H, y0 + h + 3), min(W, x0 + w + 3)
+        sub = lab[ys:ye, xs:xe] == i
+        if not adj[ys:ye, xs:xe][sub].any():
             continue
         if ink is not None:
-            ys, xs = max(0, y0 - 3), max(0, x0 - 3)
-            ye, xe = min(H, y0 + h + 3), min(W, x0 + w + 3)
-            sub = (lab[ys:ye, xs:xe] == i).astype(np.uint8)
-            ring = cv2.dilate(sub, k5).astype(bool) & ~sub.astype(bool)
+            sub8 = sub.astype(np.uint8)
+            ring = cv2.dilate(sub8, k5).astype(bool) & ~sub
             if ring.any() and float(ink[ys:ye, xs:xe][ring].mean()) >= INK_SEAL_MAX:
                 continue    # sealed interior (bubble-chain circle etc.)
-        out |= comp
+        out[ys:ye, xs:xe] |= sub
     return out
 
 
@@ -143,8 +143,8 @@ def select_sfx_comps(sfx: np.ndarray, deleted: np.ndarray, cf: np.ndarray
         x0, y0, w, h, a = (int(v) for v in st[i][:5])
         if a < MIN_AREA:
             continue
-        comp = lab == i
-        frac = float(near[comp].mean())
+        box = lab[y0:y0 + h, x0:x0 + w] == i
+        frac = float(near[y0:y0 + h, x0:x0 + w][box].mean())
         if frac < CAND_BG_FRAC:
             continue
         sub = (lab[max(0, y0 - 1):y0 + h + 1,
