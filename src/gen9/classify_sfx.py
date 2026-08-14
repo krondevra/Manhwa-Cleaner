@@ -90,12 +90,16 @@ def _enclosed(comp_u8: np.ndarray) -> np.ndarray:
 
 def find_field_specks(src: np.ndarray, deleted: np.ndarray,
                       exclude: np.ndarray | None = None,
-                      sfx_ink: np.ndarray | None = None) -> np.ndarray:
+                      sfx_ink: np.ndarray | None = None,
+                      forbidden: np.ndarray | None = None) -> np.ndarray:
     """S3: bright defect comps floating at the deleted field's edge.
 
     Returns the px to delete. `exclude` masks regions handled by later
     stages (the spiky carve -- its interstices are S6's job). `sfx_ink`
     (bool, SFX-layer black) enables the sealed-interior rejection.
+    `forbidden` (the frame lock): a comp touching it is a frame-attached
+    fragment, not a floating defect -- skipped whole (content-safe; on
+    the 006 crop no GT speck touches the lock, so this is a no-op there).
     """
     kept = ~deleted
     qual = _wand_qualifies(src) & kept
@@ -118,6 +122,8 @@ def find_field_specks(src: np.ndarray, deleted: np.ndarray,
         sub = lab[ys:ye, xs:xe] == i
         if not adj[ys:ye, xs:xe][sub].any():
             continue
+        if forbidden is not None and forbidden[ys:ye, xs:xe][sub].any():
+            continue    # frame-attached fragment, not a floating defect
         if ink is not None:
             sub8 = sub.astype(np.uint8)
             ring = cv2.dilate(sub8, k5).astype(bool) & ~sub

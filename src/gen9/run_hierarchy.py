@@ -104,7 +104,8 @@ def run_page(page_png, out_dir=None, keep_top_band=True, src=None,
         spiky_all |= z
     specks = classify_sfx.find_field_specks(src, state.mask,
                                             exclude=spiky_all,
-                                            sfx_ink=sfx_ink)
+                                            sfx_ink=sfx_ink,
+                                            forbidden=state.locks['frame'])
     state.delete(specks, tag='S3-specks')
     report['speck_px'] = int(specks.sum())
     state.verify_locks()
