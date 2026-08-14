@@ -23,26 +23,48 @@ import cv2
 import numpy as np
 
 FULL_WIDTH_SLACK = 2     # comp width >= W - slack counts as full-width
+SAT_NEUTRAL = 10.0       # rule A2: background is NEUTRAL white -- comp
+                         # mean chroma (max-min channel) below this.
+                         # Measured 2026-08-14 on 006 crop: true bg bands
+                         # 0.0-0.1, pale-yellow borderless panel 50.2.
 POCKET_NEAR_BG = 50      # user's estimate, unvalidated (no GT positives)
 POCKET_RING = 3          # px ring inspected around a pocket candidate
 POCKET_RING_INK = 0.8    # ring must be at least this fraction dark ink
 
 
 def select_background(labels: np.ndarray, stats: np.ndarray,
-                      keep_top_band: bool = True) -> list[int]:
-    """Return component ids (of clone-2 white) that are background bands.
+                      keep_top_band: bool = True,
+                      src: np.ndarray | None = None) -> list[int]:
+    """Return component ids (of the white background layer) that are
+    inter-frame background bands.
 
     Rule A1: a component is background iff it spans the full strip width.
     With keep_top_band, a full-width component touching row 0 is the
     header margin and stays (operator convention on this series).
+
+    Rule A2 (gen9 v2, needs src): background is NEUTRAL white. A
+    full-width comp whose mean chroma exceeds SAT_NEUTRAL is a tinted
+    borderless panel (006 crop GT: pale-yellow comp, sat 50.2 vs bg
+    0.0-0.1) and stays.
     """
     W = labels.shape[1]
+    mean_sat = None
+    if src is not None:
+        sat = (src.max(axis=2).astype(np.int64)
+               - src.min(axis=2).astype(np.int64))
+        flat = labels.ravel()
+        tot = np.bincount(flat, weights=sat.ravel(),
+                          minlength=stats.shape[0])
+        cnt = np.bincount(flat, minlength=stats.shape[0])
+        mean_sat = tot / np.maximum(cnt, 1)
     ids = []
     for i in range(1, stats.shape[0]):
         x0, y0, w, h, _ = stats[i]
         if w < W - FULL_WIDTH_SLACK:
             continue
         if keep_top_band and y0 == 0:
+            continue
+        if mean_sat is not None and mean_sat[i] >= SAT_NEUTRAL:
             continue
         ids.append(i)
     return ids
