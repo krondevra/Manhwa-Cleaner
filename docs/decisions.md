@@ -1420,3 +1420,27 @@ Plan approved 2026-08-14: pipeline additions + PageState write-once lock
 mechanism (raise on violation, pending registry emptied at each lock) +
 classifiers A2/B'(SFX)/C(pocket)/D(spiky ring) + staged runner + harness2
 gating every stage against its checkpoint PSD. Versions 9.05.YY-9.11.00.
+
+9.05.00-9.10.00 (2026-08-14 20:00 EEST): v2 hierarchy DELIVERED. Stage
+gates vs the 6 checkpoint PSDs: S2 diff 0 (exact), S3 98 (85 beyond-
+etalon defect extras + 13 partial-click FN), S4 100 (+2 wand-AA), S5 212
+(missed 0 of 18,883; octagon expand-4 won the kernel ladder), S6 507
+(+295 freehand-rect edge), S7/S8 212 (both ops diff 0 in isolation).
+FINAL vs etalon: 212 px = 0.0047%, over-delete 0 (FP ink/mid/blank all
+0); FN 37 ink / 2 mid / 173 blank -- all extra KEEPING at fringe
+corners. Intermediate divergences self-heal (S3/S4 covered by S5's own
+fringe, S6's by S7). Locks: write-once PageState, 11 tests, verified
+every stage, pending emptied at both boundaries, clip log empty.
+Wand semantics decoded: operates on the visible composite (red-deleted
+never qualifies -> clicks naturally contained; naive flood leaks 552k),
+tolerance = Chebyshev vs white. Third layer (120,128) verdict: EARNS IT
+-- S5 diff 212 vs outlines 5,135 (78.1% stroke coverage) vs context-fill
+4,214 (MinMax merges comps); 24x. Size+topology discriminator measured:
+pocket 1,642 px vs interiors 16k-56k (>=10x); where size fails (caption
+bbox == glyph bbox) hole/area separates 0.50 vs 15.2. New findings vs
+GT worth recording: (a) bg must be NEUTRAL white (A2) -- tinted
+full-width borderless panels exist; (b) thought-bubble chain circles =
+sealed interiors, protected by ink-seal >= 0.80 ring rule; (c) spiky
+zone must clip at the host bg-band bottom (cloud-over-frame is locked
+territory). Report: notes/reports/gen9_hierarchy_2026-08-14_report.md.
+Desktop: 006-crop_gen9v2_red/clean.png. User gates: review + merge.
