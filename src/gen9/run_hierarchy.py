@@ -93,9 +93,20 @@ def run_page(page_png, out_dir=None, keep_top_band=True, src=None,
         carve |= z
         state.add_pending(f"spiky-{c['comp_id']}", 'spiky',
                           rect=c['rect'])
+    # B' runs pre-lock: SFX elements in the background area (including at
+    # frame edges -- explicitly in scope) are pending, not frame territory,
+    # so their comps + enclosed pockets + expand-4 halo stay writable.
+    slab, ssel, srows = classify_sfx.select_sfx_comps(sfxl, state.mask, cf)
+    selmask = np.isin(slab, ssel)
+    sfx_zone = classify_sfx.expand_fringe(selmask) | \
+        classify_spiky.fill_holes(selmask)
+    carve |= sfx_zone & kept
+    for r in srows:
+        state.add_pending(f"sfx-{r['comp_id']}", 'sfx', bbox=r['bbox'])
+        if not r['selected']:
+            state.resolve(f"sfx-{r['comp_id']}", 'keep')
     frame_lock = kept & ~carve
     state.lock_frames(frame_lock)
-    field26 = state.mask.copy()   # deleted field at the frame boundary
     snap('S2')
 
     # S3 -- field-speck compensation --------------------------------------
@@ -111,12 +122,7 @@ def run_page(page_png, out_dir=None, keep_top_band=True, src=None,
     state.verify_locks()
     snap('S3')
 
-    # S4 -- trapped pockets (Classifier C; B' selection adjudicates) ------
-    slab, ssel, srows = classify_sfx.select_sfx_comps(sfxl, field26, cf)
-    for r in srows:
-        state.add_pending(f"sfx-{r['comp_id']}", 'sfx', bbox=r['bbox'])
-        if not r['selected']:
-            state.resolve(f"sfx-{r['comp_id']}", 'keep')
+    # S4 -- trapped pockets (Classifier C; B' selection from S2) ----------
     pockets, prows = classify_sfx.select_pockets(src, state.mask, slab, ssel)
     state.delete(pockets, tag='S4-pockets')
     report['sfx_selected'] = len(ssel)
@@ -125,7 +131,6 @@ def run_page(page_png, out_dir=None, keep_top_band=True, src=None,
     snap('S4')
 
     # S5 -- SFX fringe restore + lock -------------------------------------
-    selmask = np.isin(slab, ssel)
     fringe = classify_sfx.expand_fringe(selmask) & state.mask
     state.restore(fringe, tag='S5-fringe')
     for i in ssel:
