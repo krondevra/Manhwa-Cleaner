@@ -1374,3 +1374,49 @@ single-page-validated; 50px pocket proximity remains user estimate.
 Confirmation: exactly two classifiers, no authority machinery. Report:
 notes/reports/gen9_port_2026-08-13_report.md. Desktop previews delivered.
 User gates: review of red preview (esp. the 19 blue-boxed extras).
+
+## GEN 9 v2: sequential hard-lock hierarchy (frames -> SFX -> spiky), stage-validated port (2026-08-14 19:30 EEST)
+
+The user replaced the 9.04 two-classifier checkpoint with a revised
+manual algorithm: sequential hard-lock hierarchy with a dedicated third
+calibrated layer for SFX, plus a page-perfect manual pass on a 006 crop
+(690x6580) saved as INTERMEDIATE PSDs at each lock boundary
+(.tmp/gen9/new-classifiers/: before-26/30/32/44/49/53 + final etalon).
+Stage-by-stage validation replaces single-final-mask decode.
+
+POLARITY DISCREPANCY (documented per standing rule, PSD authoritative):
+the written steps' fill colors are GLOBALLY INVERTED again, same class
+as the 002_1 step-20-30 mismatch. Pinned in plan-mode probes: img mask
+black (<128) == red preview exactly (0 px disagreement) => black =
+deleted. Under that reading every stage delta is coherent and strictly
+one-directional; the text's "fill white/restore" steps delete and its
+"fill black/delete" steps restore. All six checkpoint deltas measured:
++303 px noise delete (27-29), +1,642 px trapped-SFX-pocket delete
+(30-31), 18,883 px SFX fringe restore around 15 stroke comps (33-43),
++59,839/-962 px spiky-rect whitish re-classify (45-48), 40,882 px
+interior-ellipse restore (49-52), 3,032 px letter-hole restore (53).
+
+Deterministic gates proven in plan mode (Rec.709, from source, vs the
+PSDs' own hidden layers): outlines Levels(33,1,34)+Thr(226) 100.0%;
+context-fill Levels(160,1,161)+Thr(250)+Min3/Max3 100.0% (weightings
+coincide post-MinMax); SFX Levels(120,1,121)+Thr(128) 100.0%. Base
+formula dilate1_sq3(selected cf-white comps) & ~outlines-black
+reproduces before-26 with diff = 0 px (all-wand manual pass, exactly
+reproducible, unlike 002_1's soft-selection AA).
+
+Classifier findings that drive the design: (a) full-width rule now
+insufficient -- comp 116 (pale-YELLOW borderless panel, full width) is
+NOT background; measured discriminator mean saturation 0.0-0.1 (bg) vs
+50.2 (panel) => rule A2 = full-width AND neutral-white. (b) SFX GT = 15
+selected SFX-layer comps; caption-box border/bubble border/spiky ring
+are the floating negatives; size alone does NOT separate (caption 1194
+bbox overlaps glyph 1193) -- enclosed-cf-white-interior size does
+(pocket 1,642 px vs interiors 16k/45k/48k, >=10x margin = the user's
+size+topology discriminator holding, to be formally quantified).
+(c) Frame lock confirmed in the etalon itself: the spiky ellipse portion
+overlapping the pale panel is untouched by all spiky-stage ops.
+
+Plan approved 2026-08-14: pipeline additions + PageState write-once lock
+mechanism (raise on violation, pending registry emptied at each lock) +
+classifiers A2/B'(SFX)/C(pocket)/D(spiky ring) + staged runner + harness2
+gating every stage against its checkpoint PSD. Versions 9.05.YY-9.11.00.
