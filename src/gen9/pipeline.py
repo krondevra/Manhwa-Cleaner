@@ -39,6 +39,16 @@ T1 = 226.0
 # clone-2: near-white background map (true paper white survives as white)
 LV2 = (248.0, 249.0)
 T2 = 178.0
+# gen9 v2 (2026-08-14 hierarchy, .tmp/gen9/new-classifiers/): the user
+# recalibrated the background layer for dirtier JPEG noise and added a
+# third layer tuned to isolate SFX stroke shapes.
+# context-fill: wider background tolerance, gaps closed by 3px Min/Max
+LV_CF = (160.0, 161.0)
+T_CF = 250.0
+MINMAX_CF = 3
+# SFX layer: mid-tone cut that keeps colored SFX strokes solid black
+LV_SFX = (120.0, 121.0)
+T_SFX = 128.0
 
 REC709 = (0.2126, 0.7152, 0.0722)
 REC601 = (0.299, 0.587, 0.114)
@@ -69,6 +79,28 @@ def clone2(src_rgb: np.ndarray) -> np.ndarray:
     White = near-paper-white background candidate."""
     t = threshold_lum(levels(src_rgb, *LV2), T2, REC601)
     return cv2.dilate(cv2.erode(t, SQ3), SQ3)
+
+
+def outlines(src_rgb: np.ndarray) -> np.ndarray:
+    """gen9 v2 name for the (33,1,34)/226 layer; identical to clone1."""
+    return clone1(src_rgb)
+
+
+def context_fill(src_rgb: np.ndarray) -> np.ndarray:
+    """v2 steps 14-19: Levels(160,1,161) -> Threshold(250) -> Min(3) ->
+    Max(3). White = background candidate, wide tolerance; the 7x7 square
+    Min/Max closes JPEG-noise gaps. 100.0% vs the user's own layer
+    (weightings coincide post-MinMax; Rec.709 pinned)."""
+    t = threshold_lum(levels(src_rgb, *LV_CF), T_CF, REC709)
+    k = np.ones((2 * MINMAX_CF + 1,) * 2, np.uint8)
+    return cv2.dilate(cv2.erode(t, k), k)
+
+
+def sfx_layer(src_rgb: np.ndarray) -> np.ndarray:
+    """v2 steps 37-40: Levels(120,1,121) -> Threshold(128). Black = SFX
+    stroke shapes (colored/midtone strokes survive solid, unlike the
+    near-black-only outlines cut). 100.0% vs the user's own layer."""
+    return threshold_lum(levels(src_rgb, *LV_SFX), T_SFX, REC709)
 
 
 def bg_components(c2: np.ndarray):
