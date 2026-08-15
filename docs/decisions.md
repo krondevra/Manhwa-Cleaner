@@ -1553,3 +1553,25 @@ per discipline -- NOT forcing an overfit threshold on n=2 positives.
 The 683k px over-delete class stands as the v2 hierarchy's known
 chapter-scale limitation pending a semantic-level discriminator (or an
 operator-review flag for rect-like full-width neutral comps).
+
+9.15.00 (2026-08-15 17:30 EEST): chapter-006 validation DELIVERED.
+Verdict: v2 architecture HOLDS at chapter scale (no LockViolation,
+layers 100.0000% x3, S2 exact outside 2 semantic regions, operator's
+own 2nd pass 99.2%-aligned with pipeline). Fixes shipped: (a)
+keep_top_band default False (title bg = background per etalon; title
+art survives, band over-delete 468 px vs 2.21M kept wrongly before);
+(b) RING_HOLE_RATIO_MAX=1.0 in D's ring collection (bubble/panel
+borders chained near clouds are content, not spikes; part2 over-delete
+61,071->3,046). Honest negative recorded: A2 white-panel-vs-band is
+semantic (683k px in 2 comps/chapter; flag-for-review candidate).
+before22 == ~outlines-ink (diff 0 x3); before47 == blanket cloud-zone
+restore oscillation (98% re-deleted by 49) -- our S6->S7 order
+converges, order-insensitive. Task-3 verdicts: 005 pocket-block flag =
+NOT a defect (S4 99.7% capture vs GT); 005 cloud zones should be
+re-checked after the ring fix. Final per-part over/under (auth.
+etalons): p1 397,646/94,477 (wiki 389k), p2 3,046/137,187 (op's
+uncorrected bubble 112k + diagonal 22k), p3 251,075/222,767 (scene
+251k / strips 103k). Chapter over-delete excl. semantic panels ~12k of
+77M px. Report: notes/reports/gen9_chapter006_2026-08-15_report.md.
+Desktop: 006_part{1,2,3}_clean_v914.png. Crop regression byte-identical
+at every step; 002_1 untouched; user gates review + merge.
