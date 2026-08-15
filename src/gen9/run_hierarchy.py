@@ -34,8 +34,13 @@ ISLAND_MAX = 120000   # kept comps up to this float in the bg zone
 BAND_R = 16           # near-field writable band (GT speck max dist 12)
 
 
-def run_page(page_png, out_dir=None, keep_top_band=True, src=None,
+def run_page(page_png, out_dir=None, keep_top_band=False, src=None,
              keep_snaps=True):
+    # keep_top_band default flipped 9.13.01: the 006 chapter etalon
+    # deletes the chapter-title background; with False the title ART
+    # survives the hierarchy (band over-delete 468 px vs 2.21M
+    # under-delete at True). Pass True only for chapters whose header
+    # band must be preserved wholesale.
     import cv2
 
     from gen9 import classify_bg, classify_sfx, classify_spiky
