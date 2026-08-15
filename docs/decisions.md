@@ -1444,3 +1444,56 @@ sealed interiors, protected by ink-seal >= 0.80 ring rule; (c) spiky
 zone must clip at the host bg-band bottom (cloud-over-frame is locked
 territory). Report: notes/reports/gen9_hierarchy_2026-08-14_report.md.
 Desktop: 006-crop_gen9v2_red/clean.png. User gates: review + merge.
+
+## GEN 9 v2 -- full-chapter validation, chapter 006 in 3 staged parts (2026-08-15 16:46 EEST)
+
+New GT: the user hand-cleaned ALL of 006 (690x111,838) in 3 parts
+(37,279/37,279/37,280 rows, the Desktop splits) with the same staged-
+checkpoint methodology as the crop. `.tmp/gen9/006/`: per part
+initial.png + initial-before{N}.psd + final etalon png/psd + the SHIPPED
+automatic output (`_clean.png`, RGBA, alpha 0 = deleted -- today's gen9
+v2 run on full 006, split).
+
+Inventory verified against files (not assumed symmetric): part1
+before{22,26,30,32,44,47,49,53}+54-etalon; part2 before{22,26,30,32,44}
++44-etalon, and 44-etalon == before44 EXACTLY (0/0 delta) -- part 2 has
+no spiky content; coverage is complete, not truncated. Part3 full set
++ 54-extra-manual-etalon differing from 54-etalon by restore 81,527 /
+delete 797 px -- a real second manual pass; AUTHORITATIVE for part 3
+where they disagree (diff itself to be reported).
+
+Polarity verified PER PART (project history: written-intent inversions
+recur): img raster mask black (<128) = deleted, same as the crop set;
+all three per-part chains nest strictly one-directionally -- coherent.
+Part1/2 masks span rows 0..37223 (bottom ~56 rows mask-absent = kept);
+harness handles the gap, no "fix".
+
+TWO NEW checkpoint boundaries vs the crop set:
+- before22 (all parts): pre-classifier rough state -- 24.17M px deleted
+  (94%) in part1; steps 22-25 RESTORE 11-13M px. Semantics to decode
+  (hypothesis ladder in plan), expected = delete-all-whitish with step
+  22+ being the panel/content restore judgment (A2's complement).
+- before47 (parts 1,3): the crop's single 44->49 spiky delta is TWO ops
+  in the OPPOSITE order here: 44->47 RESTORE 217k/153k px, 47->49
+  DELETE 484k/316k, 49->53 restore 176k/96k. Our S6(del)->S7(restore)
+  order must be re-gated against before47.
+
+Shipped-output-vs-etalon (Task 2 preview): part1 diff 2,681,469 px
+(over 399,701 / under 2,281,768); part2 192,363 (61k/131k); part3
+470,703 (254k/217k vs extra-etalon). Part1 localized: under = ONE comp
+y0-4252 (2.21M) = chapter-TITLE background (shipped run used
+keep_top_band=True; the operator deletes it); over = ONE full-width
+comp y33670-34384 (389k) = borderless NEUTRAL-white wiki-page panel
+(ink-frac 0.078, mean sat 1.9) -- full-width AND neutral, A2 selects
+it; the crop's chroma guard only catches TINTED panels. Residual ~80k
+distributed. Working prior: architecture holds; gaps are classifier
+generalization (A2 discriminator beyond chroma; top-band policy vs this
+chapter's etalon) + stage-scale residuals (S3 specks are 26k/118k/98k
+px here vs 303 on the crop -- first real S3 stress test).
+
+Plan approved 2026-08-15: 9.11.YY harness3 + layer determinism +
+before22 decode; 9.12.YY full-chapter staged run gated per part per
+checkpoint (boundary-attributed); 9.13.YY A2 white-panel discriminator
+ladder + top-band policy measurement; 9.14.YY measured residuals only;
+9.15.00 report. Regressions frozen throughout: crop harness2 (212 px
+chain), 002_1 (14/14), lock tests 11/11.
