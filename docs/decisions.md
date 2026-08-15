@@ -1497,3 +1497,13 @@ checkpoint (boundary-attributed); 9.13.YY A2 white-panel discriminator
 ladder + top-band policy measurement; 9.14.YY measured residuals only;
 9.15.00 report. Regressions frozen throughout: crop harness2 (212 px
 chain), 002_1 (14/14), lock tests 11/11.
+
+9.11.01-9.11.02 (2026-08-15): chapter-scale determinism + before22
+decoded. Layers gate: outlines/context-fill/SFX formulas 100.0000%
+binary agreement vs the hidden PSD layers on ALL three parts. before22
+semantics: delete = ~(outlines ink) EXACTLY -- diff 0 on parts 1, 2 and
+3 (hypothesis ladder: cf-white variants missed by 4-6.5M px; the
+operator's rough pass keeps ONLY the outlines layer's ink and steps
+22-25 restore panels/content, i.e. the complement of classifier A2's
+selection -- confirms the hierarchy's reading of the pre-26 flow).
+Nesting + task2 gates reproduced in harness3 (.tmp, untracked).
