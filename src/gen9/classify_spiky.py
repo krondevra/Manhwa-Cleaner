@@ -32,6 +32,12 @@ BAND_IN = 10             # annulus: dilate(interior) radius 10..25
 BAND_OUT = 25
 CROSSINGS_MIN = 100      # spike-fragment count threshold (259 vs <=29)
 RING_REACH = 25          # SFX-black comps within this of interior = ring
+RING_HOLE_RATIO_MAX = 1.0  # a spike comp is an OPEN stroke (crop wreath
+                         # halves: 0.02); an ink comp enclosing more
+                         # white than its own area is a bubble/panel
+                         # border chained near the cloud (part2 burst:
+                         # bubble+frame comp 3.67 -> 22k px over-delete
+                         # inside the bubble) -- content, not ring
 RECT_PAD = 20            # padded working rectangle around ring+interior
 FULL_WIDTH_SLACK = 2
 SQ3 = np.ones((3, 3), np.uint8)
@@ -89,6 +95,13 @@ def find_spiky(cf: np.ndarray, sfx: np.ndarray, bg_selected: np.ndarray,
             box = lab2[jy:jy + jh, jx:jx + jw] == j
             if reach[jy:jy + jh, jx:jx + jw][box].any() and \
                     not interior[jy:jy + jh, jx:jx + jw][box].any():
+                sub = np.zeros((jh + 2, jw + 2), np.uint8)
+                sub[1:-1, 1:-1] = box
+                n3, l3 = cv2.connectedComponents(
+                    (sub == 0).astype(np.uint8), connectivity=4)
+                hole = int((l3 != l3[0, 0]).sum()) - int(box.sum())
+                if hole >= RING_HOLE_RATIO_MAX * ja:
+                    continue    # encloses >= own ink: bubble/panel border
                 ring[jy:jy + jh, jx:jx + jw] |= box
         area = interior | ring
         ysA, xsA = np.where(area)
