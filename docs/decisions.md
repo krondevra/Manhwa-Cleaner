@@ -1532,3 +1532,24 @@ is the same uncorrected first-pass error class -> ~85% of part2's
 apparent under-delete is not a pipeline defect. True remaining gaps:
 title-band policy (2.21M), 2 neutral-white panels (683k), speed-line
 strips (103k), diagonal gap (22k), distributed residuals (~80k/part).
+
+9.13.00 (2026-08-15): Task 4a HONEST NEGATIVE -- A2 neutral-white panel
+discriminator. Ladder run (one variable per attempt) on the 47 A2-
+selected chapter comps with the two GT panel interiors tagged (p1 wiki
+751, p3 scene 2591): (1) bbox colored-row fraction -- FAILS, sprawling
+bands wrap floating panels through gutters and score up to 26% while
+panels score 1-3%; (2) comp-px whiteness (frac<235 / p05) -- FAILS,
+genuinely GRAY bg bands exist (comp 2847: 55% sub-white, p05 171, true
+bg per etalon) while the scene measures 1.12% == band level; (3) hole
+colored-content -- FAILS, band holes ARE whole panels (76% colored);
+(4) two-stage rect-gate + {grounded-structure, ink, midtone, max-
+struct} batch -- FAILS each: scene grounded 28.8% is high but bands
+reach 34.7%; wiki grounded 0.05%; ink% spans 0-27.9% among TRUE bands
+(black burst bubbles), overlapping both panels (7.5/11.0). Verdict:
+neutral-white borderless panel interiors vs bg bands is a SEMANTIC
+distinction (screenshot / drawn scene recognition); not expressible in
+the current local-feature family. STRUCTURAL gap, reported distinctly
+per discipline -- NOT forcing an overfit threshold on n=2 positives.
+The 683k px over-delete class stands as the v2 hierarchy's known
+chapter-scale limitation pending a semantic-level discriminator (or an
+operator-review flag for rect-like full-width neutral comps).
