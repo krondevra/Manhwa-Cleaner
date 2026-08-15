@@ -1507,3 +1507,28 @@ operator's rough pass keeps ONLY the outlines layer's ink and steps
 22-25 restore panels/content, i.e. the complement of classifier A2's
 selection -- confirms the hierarchy's reading of the pre-26 flow).
 Nesting + task2 gates reproduced in harness3 (.tmp, untracked).
+
+9.12.00 (2026-08-15): Task-1 chain gate run + divergence forensics.
+Chain snapshots vs checkpoints: part1 S2 excl. the two known regions =
+diff 0 (base stage EXACT elsewhere); S8 final diffs equal the shipped-
+output diffs byte-for-byte for all parts -> NO deploy gap, Task1 and
+Task2 converge; every remaining gap is classifier-level. S2 divergences
+localized: (a) over-delete = TWO full-width neutral-white PANEL
+interiors -- part1 wiki page y33670-34384 (428k) and part3 borderless
+white scene w/ colored art y13381-13902 (255k) -- the A2 class the crop
+never exercised (its guard is chroma-only); (b) under-delete = new bg
+GEOMETRIES: part2 diagonal white panel gap (22k, pieces not full-width)
+and part3 SPEED-LINE gradient strips y22610/y25397 (103k, not cf-white
+at ALL -- not expressible as a cf-white comp selection; structural note
+for the "select bg" vs operator's "restore panels" formulation).
+MAJOR: operator's 26->30 "speck" stage at chapter scale is dominated by
+BUBBLE INTERIORS (part2 one burst-bubble 112,356 px; part3 cloud-bubble
+62,177 + 6,795 + 11,961) -- and part3's 54-extra-manual pass RESTORES
+exactly those three comps (81,527 px, 99.2% of which we also kept):
+the operator's own second pass corrected the first pass TOWARD the
+automated output. Final intent = bubble interiors KEPT (matches crop
+semantics and our B'); part2's 112k interior (no second pass exists)
+is the same uncorrected first-pass error class -> ~85% of part2's
+apparent under-delete is not a pipeline defect. True remaining gaps:
+title-band policy (2.21M), 2 neutral-white panels (683k), speed-line
+strips (103k), diagonal gap (22k), distributed residuals (~80k/part).
