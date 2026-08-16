@@ -1627,3 +1627,12 @@ guard skips; every stage now renames the working layer
 (name@levels/@thr/@slam) so a crashed PSD identifies its stop point
 without alerts. Threshold-AdjL remains unproven-in-isolation (v1's
 threshold DID execute, so still the best-evidenced luma-collapse op).
+
+9.16.03 (2026-08-16): JSX VERIFIED. v4 run in Photopea ("006_part1_
+initial (2).psd"): full 5-layer stack, all three masks strictly binary
+(uniq=2), and pixel-exact vs the manual reference -- outlines 0 px
+(was 31.34%), outlines-SFX 0 px (was 2.04%), context-fill 0 px (was
+13.16%). The 601-tuned threshold substitution (200/128/240 after
+corner-collapse Levels) reproduces the Rec.709 reference math exactly,
+as predicted by simulation. Script: .tmp/gen9/script-diagnostic/
+gen9-v2-setup.jsx (v4) + Desktop copy gen9-v2-setup-v4.jsx.
