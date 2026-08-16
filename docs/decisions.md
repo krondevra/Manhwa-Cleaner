@@ -2035,3 +2035,16 @@ the bg-side fragments. This mirrors what the operator's manual step 40
 actually does when they break connections by hand. Evidence caveat:
 one out-of-series chapter; the geometric-cut proposal should be gated
 on 006/002_1 no-regression like every classifier change.
+
+9.17.03-9.17.06 (2026-08-16 23:15 EEST): Task 3 + delivery. Pipeline
+vs 53-extra-manual on 020p1: FINAL diff 691,506 px (2.49%), over
+589,420 (ink 8,964 / mid 205,565 / blank 374,891), under 102,086.
+Stage gates: S2 232,438 (all over, all = ONE full-width borderless
+bright-scene comp y29456-30242 -- semantic-panel structural class,
+instances 3+ across chapters); S6 mid-tone halo ~200k on pale-green
+borderless washes around bursts (host-bottom clip has no frame line);
+under = merged-SFX fringe 51.5k (matches Task 1's 51,453 exactly --
+classes close) + title-glow ~51k (safe direction). SFX threshold
+120/128 NOT miscalibrated -- unchanged. Report:
+.tmp/notes/reports/gen9_020p1_sfx_2026-08-16_report.md. User gates:
+the geometric B' bg-zone-clip proposal (9.17.02) awaits decision.
