@@ -2015,3 +2015,23 @@ on 006p1: 53 comps (45 isolated / 8 non-compact) and merged-only
 fringe = 0 px -- every 006 GT stroke was isolated. The user's
 diagnosis is confirmed and the failure is CHAPTER-SPECIFIC, exactly
 the B' compactness-skip class predicted in 9.17.00.
+
+9.17.02 Task 2 VERDICT: (b) STRUCTURAL, and stronger than the
+anticipated form. Per-instance threshold sweep on all 16 merged
+fringe-instances (window-local, T in [40,120], levels(T,1,T+1)
+semantics): stroke survival requires T >= 114-120 (Tlive), while
+SEPARATION FROM THE FRAME NEVER OCCURS at any T down to 40 -- the
+window [Tlive, Tsep] is empty for 16/16 instances because the
+connecting px are solid near-black ink: 020's SFX are DRAWN
+overlapping panel art/frame lines (visually verified: glyph tails
+crossing into panels). Consequence: NO single recalibrated threshold
+exists (rules out (a)) and NO per-page ADAPTIVE threshold would help
+either -- the boundary is geometric, not tonal. Task 4 does not apply.
+Task 5 proposal (NOT implemented, user decision): B' candidacy should
+operate on connected components of (SFX-ink INTERSECT dilated bg-zone)
+-- i.e., clip megacomps at the frame-lock boundary the pipeline
+already owns at S2, then apply the existing compactness/hole tests to
+the bg-side fragments. This mirrors what the operator's manual step 40
+actually does when they break connections by hand. Evidence caveat:
+one out-of-series chapter; the geometric-cut proposal should be gated
+on 006/002_1 no-regression like every classifier change.
