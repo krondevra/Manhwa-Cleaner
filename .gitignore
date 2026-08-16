@@ -46,3 +46,5 @@ out*.txt
 *.npy
 *.npz
 *.pth
+# Restructure 2026-08-16: src/dev is experimental/untracked (.tmp/ already ignored above).
+src/dev/

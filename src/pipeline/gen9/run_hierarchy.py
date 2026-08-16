@@ -194,6 +194,6 @@ def run_page(page_png, out_dir=None, keep_top_band=False, src=None,
 
 if __name__ == '__main__':
     _, s, rep = run_page(sys.argv[1],
-                         sys.argv[2] if len(sys.argv) > 2 else '.tmp/gen9/out',
+                         sys.argv[2] if len(sys.argv) > 2 else '.tmp/debug/gen9/out',
                          keep_snaps=False)
     print(rep)

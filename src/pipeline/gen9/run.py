@@ -1,6 +1,6 @@
 """Gen9 end-to-end: automated port of the user's Photopea algorithm.
 
-Usage: .venv/bin/python src/gen9/run.py <page.png> [out_dir=.tmp/gen9/out]
+Usage: .venv/bin/python src/gen9/run.py <page.png> [out_dir=.tmp/debug/gen9/out]
 
 Outputs (named after the input stem):
   <stem>_gen9_delete.npy   boolean delete mask
