@@ -1598,3 +1598,20 @@ with step names + histogram no-op guard (the failure mode that hid
 bug 1). Verification pending a Photopea re-run by the user (no browser
 tools this session). src/gen9/ untouched. Report:
 notes/reports/gen9_jsx_diagnostic_2026-08-16_report.md.
+
+9.16.01 (2026-08-16): v2 script partial run decoded + v3 rewrite. The
+user's re-run PSD (gen9-v2-setup2.psd: fill/img/context-fill only,
+context-fill = 8 unique values) PROVES the Levels adjustment layer now
+executes (8 values == the 8 RGB corner colors after per-channel
+1-unit-window Levels -- bug 1 confirmed fixed) and that Photopea
+REJECTS the ChannelMixer descriptor (script threw at that step, per
+design, mid first build). v3 drops the mixer entirely: after corner-
+collapse Levels, the Rec.709 reference classification is a corner
+SUBSET, and every subset boundary falls in a wide gap of Photopea-
+Threshold's own 601 luma (corners: 255/226/179/150/105/76/29/0).
+Re-tuned Photopea thresholds: outlines 200 (algorithm 226@709), SFX
+128 (unchanged), context-fill 240 (algorithm 250@709); final
+Levels(127,1,128) merge slams threshold AA. Simulated: 0 px vs
+reference on all three layers under BOTH plausible 601 variants
+(margins >= 21 luma units). v3 uses only Photopea-proven mechanisms
+(Levels-AdjL, Threshold-AdjL, merge, Min/Max).
