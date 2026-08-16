@@ -2005,3 +2005,13 @@ megacomps. Pre-measurement: full-width SFX-ink megacomps exist on BOTH
 chapters (006p1 56.7% of ink, 020p1 72.1%) -- raw merging is not new;
 the diagnostic question is whether BG-ZONE glyph instances merge.
 Harness4 (src/dev/gen9/harness) decodes/caches + nesting gate.
+
+9.17.01 Task 1 CONFIRMED with numbers: on 020p1, 144 GT-overlapped SFX
+comps split 121 isolated (79,967 px) vs 23 frame-connected megacomps
+(5.12M px, kept-frac ~1.00 -- panel/frame bodies with strokes hanging
+into bg). Fringe-restore attribution: isolated-only 40,026 px,
+MERGED-only 51,453 px (55%), both 1,432, neither 143. Same measurement
+on 006p1: 53 comps (45 isolated / 8 non-compact) and merged-only
+fringe = 0 px -- every 006 GT stroke was isolated. The user's
+diagnosis is confirmed and the failure is CHAPTER-SPECIFIC, exactly
+the B' compactness-skip class predicted in 9.17.00.
