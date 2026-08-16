@@ -1575,3 +1575,26 @@ uncorrected bubble 112k + diagonal 22k), p3 251,075/222,767 (scene
 77M px. Report: notes/reports/gen9_chapter006_2026-08-15_report.md.
 Desktop: 006_part{1,2,3}_clean_v914.png. Crop regression byte-identical
 at every step; 002_1 untouched; user gates review + merge.
+
+9.16.00 (2026-08-16): JSX setup-script diagnostic. Root cause of the
+31%/13%/2% layer divergence vs before44 -- TWO bugs, both measured:
+(1) applyLevels() was a SILENT NO-OP (script output == "Photopea
+Threshold on the RAW source": outlines 0.467% / SFX 0.090% / cf 0.268%
+model fit, residue = the script's own AA edges; all four luma
+weightings of "levels-then-threshold" sit at ~30% -- Levels never
+ran); (2) Photopea's Threshold adjustment uses ~Rec.601 luma WITH
+edge anti-aliasing (the 97-102-unique-values artifact), while the
+reference is per-channel Levels -> Rec.709 -> hard cut, strictly
+binary. Original luminosity-first hypothesis REFUTED in detail:
+reference math is levels-FIRST (desaturate-first provably diverges on
+colored px; (200,10,10) flips class). Fix: rewrite ops as adjustment
+layers merged stepwise (Mk-AdjL = the pathway the old script proved
+works): Levels(lo,1,hi) -> ChannelMixer monochrome 21/72/7 (Rec.709)
+-> Levels(T-1,1,T) as threshold substitute (binary by construction, no
+AA, sidesteps Photopea's 601). Integer mixer percents proven exact:
+predicted diff 0 px on ALL THREE layers in all four rounding regimes
+(1-unit Levels windows quantize the cut). Failures now alert+throw
+with step names + histogram no-op guard (the failure mode that hid
+bug 1). Verification pending a Photopea re-run by the user (no browser
+tools this session). src/gen9/ untouched. Report:
+notes/reports/gen9_jsx_diagnostic_2026-08-16_report.md.
