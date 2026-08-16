@@ -1615,3 +1615,15 @@ Levels(127,1,128) merge slams threshold AA. Simulated: 0 px vs
 reference on all three layers under BOTH plausible 601 variants
 (margins >= 21 luma units). v3 uses only Photopea-proven mechanisms
 (Levels-AdjL, Threshold-AdjL, merge, Min/Max).
+
+9.16.02 (2026-08-16): v3 crash decoded -- v2 and v3 died at the SAME
+instruction (byte-identical partial PSDs, md5-equal), which is the code
+they SHARE after the Levels merge: assertChanged(). Photopea does not
+implement layer.histogram -> the no-op GUARD itself threw an uncaught
+TypeError, silently (no alert; fail() never reached). The v2
+"ChannelMixer rejected" attribution was wrong -- the mixer was never
+reached. v4: layerHistogram() returns null when unavailable and the
+guard skips; every stage now renames the working layer
+(name@levels/@thr/@slam) so a crashed PSD identifies its stop point
+without alerts. Threshold-AdjL remains unproven-in-isolation (v1's
+threshold DID execute, so still the best-evidenced luma-collapse op).
