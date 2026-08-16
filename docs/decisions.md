@@ -1982,3 +1982,26 @@ reference PSDs from the same workflow. Structurally different layouts (grid/
 tiled panels, dark gutters, borderless-dominant chapters) are UNTESTED; the
 dark-background domain is PAUSED pending manual reference PSDs and would break
 the row-blankness signal specifically. Known gaps, not silent assumptions.
+
+## GEN 9 -- 020 part1 SFX-layer generalization diagnostic (2026-08-16 22:04 EEST)
+
+9.17.00: first staged GT OUTSIDE the calibration series: 020 part1
+(720x38,650), hand-cleaned strictly per the v2 algorithm. Checkpoints
+.tmp/psd/gen9/020/: before{27,32,36,39,43,45,48,52,53} +
+53-extra-manual (AUTHORITATIVE; the 53->extra delta is +3,160/-123,121
+px -- another real second-pass correction, same class as 006 part3's).
+Polarity identical (mask black = deleted); chain nests one-directional
+(one 2-px AA exception at 45->48). Step mapping per the v2 text:
+27->32 restore 11.59M = panel restore (S2); 32->36 +209,011 specks
+(S3); 36->39 +25,123 pockets (S4); 39->43 -93,054 SFX fringe (S5);
+43->45 -269,449 spiky rect; 45->48 +760,113 whitish (S6); 48->52
+-380,659 interior (S7); 52->53 -24,981.
+Reported problem (user): SFX layer (120/128) merges SFX strokes with
+frame lines on this source, breaking step 40's contiguous wand.
+KEY REFRAME: the pipeline never wands contiguously -- B' is
+comp-based -- so the equivalent pipeline failure is B' compactness
+(BBOX_MAX 250) silently skipping strokes absorbed into frame
+megacomps. Pre-measurement: full-width SFX-ink megacomps exist on BOTH
+chapters (006p1 56.7% of ink, 020p1 72.1%) -- raw merging is not new;
+the diagnostic question is whether BG-ZONE glyph instances merge.
+Harness4 (src/dev/gen9/harness) decodes/caches + nesting gate.
