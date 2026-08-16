@@ -2048,3 +2048,41 @@ classes close) + title-glow ~51k (safe direction). SFX threshold
 120/128 NOT miscalibrated -- unchanged. Report:
 .tmp/notes/reports/gen9_020p1_sfx_2026-08-16_report.md. User gates:
 the geometric B' bg-zone-clip proposal (9.17.02) awaits decision.
+
+## 9.18.00 -- CC-BY stress-test demo page + P&C repo history audit (2026-08-16 23:00 EEST)
+
+Demo page (src/dev/demo/build_stress_page.py, deterministic, sibling
+repo imported READ-ONLY, git status clean before/after): 690x3605
+strip, 5 segments, each a documented failure class, run through BOTH
+pipelines (10.0-baseline+--reclaim-islands via PYTHONPATH=src/dev
+workaround for the restructure-broken style_analysis import;
+gen9 v2). Measured outcomes: SEG-A near-white full-bleed panel --
+FIRED, gen9 AND old ML both delete 100% (shared semantic-panel
+failure); SEG-B smooth-bubble halo -- FIRED, ML kept-frac rings
+0.989/0.978/0.977/0.963/0.882 (2-32px wide decay) vs gen9's tight
+expand-4 fringe; SEG-C spiky-vs-cloud -- honestly NOT fired: P&C
+spiky renderer yields annulus crossings 8 vs D's 100 (24-110 short
+merging rays vs manhwa 100+ strokes); D correctly refuses, bubbles
+preserved; generator limitation noted. SEG-D frame-straddling black
+SFX -- FIRED, 690x311 megacomp B'-skipped (exact 020 mechanism), with
+compact fragments as contrast; SEG-E real P&C art framed on black
+(legacy black-variant convention + make_jpeg_variant) -- FIRED, ML
+under-deletes 100% of 160,630 black-bg px; gen9 also 0% (dark-bg
+domain PAUSED both eras, honest shared limitation). Corrections to
+the brief established by exploration: ML halo is bubble-contour class
+(NOT near-black; that is a separate defect, both included); "with/
+without-cloud spiky" does not exist in the generator (families
+oval/organic_oval/spiky/thorn/cloud/rectangle). Deliverables:
+.tmp/demo/* + Desktop demo_stress_{page,ml_red,gen9_red}.png +
+annotations note.
+
+P&C history audit (STOP point, no execution): timeline established --
+MC gen-6 pivot 6.1.1 (2026-07-26), sibling-off-limits policy
+2026-07-31/08-01; PepperNCarrotDataset data/ is gitignored (no P&C
+pixels in git); commits after v1.20.0 (dd46d15 2026-07-08) touch ONLY
+src/synthesize+src/tools -- ZERO touch real-P&C paths (last:
+src/process 2026-07-03, assets 2026-06-30, download/extract/licenses
+v1.0.0); v1.20.0..HEAD (10 commits) all UNPUSHED (origin at v1.19.0).
+PROPOSAL: (c) no rewrite -- the remembered problem does not exist in
+the log; this entry records the audit. Any history operation awaits
+explicit user decision (none recommended).
