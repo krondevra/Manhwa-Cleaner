@@ -2115,3 +2115,25 @@ Measured (trigger_verification2.json):
   solid-235 + ticked legacy black-bg border variants (shared paused
   domain).
 Sibling repo untouched (read-only imports; git status clean).
+
+## 9.18.02 (2026-08-17) -- 후두둑 rain-SFX asset for E23P02 (bridge demo)
+
+One standalone asset for the user's E23P02 stress composition: white
+17px disc-stamp stroke (make_sfx long-SFX rule max(7, fsize//14),
+fsize 240), 3-stop vertical gradient sampled from the panel (sky teal
+137,168,169 / wet slate 85,101,110 / stone shadow 48,54,54), scream-
+family near-vertical stagger. Driver src/dev/demo/make_sfx_rain.py
+(make_sfx.py cannot render white-outline-over-gradient -- its gradient
+modes hard-code a luma-inverted outline -- and executes a full asset
+render at import; sibling repo edit-frozen, so the ~90-line renderer
+replicates its conventions in-repo). MEASURED border audit of the
+user's PSD: both drawn borders are 2px pure black with zero light gaps
+in all 2275 columns -> no in-border bridge exists; the genuine bridge
+is the full-width panel's UNBORDERED side page-edge (v6 convention).
+Recommended paste center (140,470): flattened preview shows one
+edge-touching luma>=230 comp, 55,735 px, penetrating 336 px into the
+panel. History corrections recorded: leak class is v1-v5-era (v6 pivot
+fixed); SFX-outline case reproduces on a5_full2k.pt, NOT on production
+10.0-baseline (ml_strategy_history:1450-1456) -- pipeline behavior on
+this asset is a claim for the assembly step's measurement, not now.
+Asset NOT composited anywhere; user's PSD opened read-only.
