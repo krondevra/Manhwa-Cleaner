@@ -2214,3 +2214,18 @@ no expand radius would reach disconnected comps. Real chapters immune
 on both: 020p1 ink G p90=97/max=120 (no px above the knee); the
 closed-sliver class absent from all 006/020 staged-GT diffs.
 Demo-content-specific; nothing pipeline-ward proposed.
+
+## 9.18.09 (2026-08-17) -- Task 1: dark-gradient SFX applied (asset-side)
+
+STOPS swapped to (90,110,111)/(70,85,92)/(48,54,54) in make_sfx_rain
+(palette only); 7 variants regenerated -- alpha byte-identical x7
+(geometry gate), interior fill-as-ink 100.00% x7 (raw 92-95% = the
+1px AA blend ring vs the white outline, fringe-recoverable, same class
+as real-chapter stroke AA). Page rebuilt from the user's PSD: base
+composite + EXACT ramp remap of the placed rasters (user's free
+transforms incl. ~36-deg rotations preserved; alpha untouched so the
+etalon stays valid); fidelity gate 0 px diff>2 vs E23P02-initial.
+gen9 on the SFX-dark page: SFX locks 20->30, fringe 5,881->12,374 px;
+outline over-delete 6,496 -> 1,650 (v1 0.1%, v3 0%, v4 3.4%, v6 6.7%,
+v7 20.8% -- residual is v7's small placement scale, AA-dominated thin
+strokes); fill over-delete 2,603 -> 0. No pipeline change.
