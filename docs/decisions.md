@@ -2229,3 +2229,15 @@ gen9 on the SFX-dark page: SFX locks 20->30, fringe 5,881->12,374 px;
 outline over-delete 6,496 -> 1,650 (v1 0.1%, v3 0%, v4 3.4%, v6 6.7%,
 v7 20.8% -- residual is v7's small placement scale, AA-dominated thin
 strokes); fill over-delete 2,603 -> 0. No pipeline change.
+
+## 9.18.10 (2026-08-17) -- Task 2: non-fusing burst adopted (attempt 1)
+
+make_burst parameterized (n_rays/width_mul only; geometry family
+unchanged). Attempt 1: N=56 rays, width x3.0 -- enclosure gate at
+0.263x display scale (real sfx_layer math, oval interior excluded):
+ZERO enclosed slivers, adopted first try (protocol allowed 56->40->32).
+burst_inv regenerated to match; 640-ray originals preserved under
+bubbles/original-640ray/. Placed into the page at the user's burst
+bbox (291x230). Updated GT mask (burst alpha swap only, user's etalon
+file untouched) saved as E23P02-clean-updated.npy; user etalon
+validated == PSD layer-alpha union at 100.00% agreement first.
