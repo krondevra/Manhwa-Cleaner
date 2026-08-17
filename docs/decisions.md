@@ -2241,3 +2241,16 @@ bubbles/original-640ray/. Placed into the page at the user's burst
 bbox (291x230). Updated GT mask (burst alpha swap only, user's etalon
 file untouched) saved as E23P02-clean-updated.npy; user etalon
 validated == PSD layer-alpha union at 100.00% agreement first.
+
+## 9.18.11 (2026-08-17) -- Task 3: final page vs etalon -- 1.52% -> 0.81%
+
+E23P02-final.png (remapped dark SFX + N=56 burst) through both
+pipelines vs the updated GT: gen9 8,972 px (0.81%, over 2,290 / under
+6,682) vs baseline 16,915 (1.52%, over 9,746); ML 87,084 (7.84%) vs
+93,677 (8.43%). Over-delete down 4.3x. Burst residual 5,852 -> 4,390
+with attribution shift: asset-internal enclosures ELIMINATED (0 on
+standalone); remaining = 3,310 px NEW enclosures where rays overlap
+the bottom panel art (placement-driven; unreachable by any contiguous
+selection incl. the manual algorithm's wand -- layer-alpha GT is
+stricter than spec) + ~1,080 AA-edge px. Report
+demo_fixes_2026-08-17_report.md. Pipeline untouched throughout.
