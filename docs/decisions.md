@@ -2196,3 +2196,21 @@ white-on-white structural class (S2-attributed, S5 fringe covers its
 Bubble-ring keeps 6.9k = burst inter-ray enclosed slivers + deliberate
 S5 fringe. Remainder over 504 / under 236 px. No pipeline change made
 or needed; outline-reconstruction stays user-gated for high-res.
+
+## 9.18.08 (2026-08-17) -- residual demo defects root-caused: tonal (SFX palette) + geometric (burst enclosure)
+
+Measurement-only (diag_sfx_tonal_geom.py); production 120/121/128 and
+the 2-4px expand class untouched and re-vindicated. (1) Outline
+under-restore = 100% TONAL in every variant (6,373 of 6,496 px; geom
+123): fill px with G>=121 read NOT-ink under Levels(120,1,121)+REC709
+(exact gate, 0 exceptions over 13,444 px; 42-84% of each variant's
+fill, AA against the white outline worsens the analytic prediction),
+so B'/S5 have no locked comp to anchor the ring restore. Fix = asset
+guideline max(R,G,B)<=110 per stop (validated 65%->100% fill-as-ink
+with same-hue darker stops); not a pipeline change. (2) Burst residue
+= 100% GEOMETRIC enclosure: 5,852/5,852 under px sealed off from the
+bg comp by AA-fused rays at 0.26x scale (sliver half-width p50 1.4px);
+no expand radius would reach disconnected comps. Real chapters immune
+on both: 020p1 ink G p90=97/max=120 (no px above the knee); the
+closed-sliver class absent from all 006/020 staged-GT diffs.
+Demo-content-specific; nothing pipeline-ward proposed.
