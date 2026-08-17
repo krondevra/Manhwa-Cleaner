@@ -2263,3 +2263,9 @@ GT from PSD layer-alpha union. gen9: 7,345 px / 0.66% vs GT (best of
 arc: 1.52% -> 0.81% -> 0.66%, now on JPEG input); ML 105,256 / 9.47%
 (halo class worsens under JPEG). Artifacts in .tmp/demo/output/,
 note .tmp/notes/E23P02_input_run_results.md.
+
+## 9.18.13 (2026-08-17) -- rerun on user-updated input/ composition
+
+Repositioned assets + doubled burst layer. gen9 7,583 px / 0.68% vs
+rebuilt GT (consistent with 0.66%); ML 106,007 / 9.54%. output/
+refreshed in place.
