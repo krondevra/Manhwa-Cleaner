@@ -2184,3 +2184,15 @@ page-wide gen9 deleted-on-art 48.5k -> 4.7k. ML halo class unchanged
 (kept-bg 161k vs 70k). Recorded caveat: full-res inputs are
 out-of-domain for the fixed expand class; outline-reconstruction
 proposal stays user-gated for that scenario.
+
+## 9.18.07 (2026-08-17) -- gen9 vindicated against the user's E23P02 etalon
+
+User supplied hand-built GT (E23P02-clean.png, layer-alpha). Measured:
+gen9 diff 16,915 px (1.52%) vs ML 93,677 (8.43%). Cloud halo does NOT
+exist in gen9 output (28 px / 0.4% of ring) -- the remembered halo was
+the ML red previews. SFX-outline residual 6,496 px is the known
+white-on-white structural class (S2-attributed, S5 fringe covers its
+2-4px reach; v7 65% due to light palette), invisible white-on-white.
+Bubble-ring keeps 6.9k = burst inter-ray enclosed slivers + deliberate
+S5 fringe. Remainder over 504 / under 236 px. No pipeline change made
+or needed; outline-reconstruction stays user-gated for high-res.
