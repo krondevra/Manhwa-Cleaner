@@ -2171,3 +2171,16 @@ deleted 20,045 px of real art; outline rings consumed on white bg;
 ~6k px burst ray tips. First reproduction of the flood-fill-leakage
 mechanism against the CLASSICAL pipeline -- new exhibit class for the
 demo (results note .tmp/demo/E23P02_demo_results.md).
+
+## 9.18.06 (2026-08-17) -- E23P02 rerun at production scale: size effect confirmed
+
+User diagnosis correct: the outline consumption was a scale artifact.
+On E23P02-resized (690x1610; full-res outputs deleted per user), the
+17px ring becomes ~5px -- inside the fixed 2-4px expand class -- and
+outline deletion drops 72-94% -> 4-30% (v7 64%, light palette + small
+scale, visually invisible white-on-white); the 20,045-px mini-panel-3
+art leak vanishes entirely (0 deleted-on-art, both pipelines);
+page-wide gen9 deleted-on-art 48.5k -> 4.7k. ML halo class unchanged
+(kept-bg 161k vs 70k). Recorded caveat: full-res inputs are
+out-of-domain for the fixed expand class; outline-reconstruction
+proposal stays user-gated for that scenario.
