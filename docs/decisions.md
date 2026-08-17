@@ -2254,3 +2254,12 @@ the bottom panel art (placement-driven; unreachable by any contiguous
 selection incl. the manual algorithm's wand -- layer-alpha GT is
 stricter than spec) + ~1,080 AA-edge px. Report
 demo_fixes_2026-08-17_report.md. Pipeline untouched throughout.
+
+## 9.18.12 (2026-08-17) -- tidy demo rerun from .tmp/demo/input/ (JPEG)
+
+User reorganized .tmp/demo/ (input/ + output/ layout). Rebuilt
+composition with all fixed assets, exported as JPEG (chapter-realism).
+GT from PSD layer-alpha union. gen9: 7,345 px / 0.66% vs GT (best of
+arc: 1.52% -> 0.81% -> 0.66%, now on JPEG input); ML 105,256 / 9.47%
+(halo class worsens under JPEG). Artifacts in .tmp/demo/output/,
+note .tmp/notes/E23P02_input_run_results.md.
