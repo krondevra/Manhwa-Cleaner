@@ -2156,3 +2156,18 @@ right/left/diag, dense 640-ray burst + inverted, thought, cloud,
 rect_box + inverted. White-fill/black-outline convention, outline
 widths scaled (3->4px, burst oval 5->7px). Output .tmp/demo/bubbles/
 + contact sheet over the rain panel (light + dark grounds).
+
+## 9.18.05 (2026-08-17) -- user's E23P02 composition through both pipelines
+
+User composited E23P02 (2275x5308: rain panel + mini frames + added
+white gaps, 후두둑 SFX crossing page-edge and mini-frame borders,
+bubble shapes, burst). Measured: 10.0-baseline does NOT flood
+(consistent with ml_strategy_history:1450-56) -- its failure is halo
+under-deletion (~549k extra kept-bg px vs gen9; blobs around every
+overlay), art damage 593 px. gen9 v2: tight elsewhere (33 SFX locks,
+52.7k fringe) BUT the white-outline bridge leaked: bg selection flowed
+through the frame-crossing glyph's outline into mini-panel-3 and
+deleted 20,045 px of real art; outline rings consumed on white bg;
+~6k px burst ray tips. First reproduction of the flood-fill-leakage
+mechanism against the CLASSICAL pipeline -- new exhibit class for the
+demo (results note .tmp/demo/E23P02_demo_results.md).
