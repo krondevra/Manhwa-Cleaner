@@ -2269,3 +2269,17 @@ note .tmp/notes/E23P02_input_run_results.md.
 Repositioned assets + doubled burst layer. gen9 7,583 px / 0.68% vs
 rebuilt GT (consistent with 0.66%); ML 106,007 / 9.54%. output/
 refreshed in place.
+
+## 9.18.14 (2026-08-17) -- border-sliver diagnosis: known enclosure class, not MinMax, not JPEG
+
+History verified: MinMax stepping never fixed nor claimed fixed
+(9.01-9.04 scope + delivery entries; git log sweep zero claims).
+Flagged strips measured: 3 instances, 540 px total -- channels between
+overlapping content (oval bubble underside, burst rays) and border
+lines; px either SEALED from the bg comp (145) or below the white
+threshold (395). PNG-control run: strips persist (not JPEG; control
+page-wide slightly worse, 9,042 vs 7,583 -- JPEG noise incidentally
+helps). Same stricter-than-spec-GT enclosure family as 9.18.11.
+No pipeline change; content-side remedy = keep asset edges ~8px off
+border lines; any pipeline-side trapped-channel rule = new scope,
+user-gated with full regression battery.
