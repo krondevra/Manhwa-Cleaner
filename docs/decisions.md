@@ -2086,3 +2086,32 @@ v1.0.0); v1.20.0..HEAD (10 commits) all UNPUSHED (origin at v1.19.0).
 PROPOSAL: (c) no rewrite -- the remembered problem does not exist in
 the log; this entry records the audit. Any history operation awaits
 explicit user decision (none recommended).
+
+## 9.18.01 (2026-08-17) -- demo page v2: real-art rebuild, all five classes measured
+
+User verdict on 9.18.00's page: too synthetic. Rebuilt entirely from
+real P&C art via the LEGACY variant pipeline (synthesize_dataset makers
+run at final 690-px resolution on resized speechbubbles_cleaned crops;
+legacy overlay bubble/SFX assets; zero curriculum-generator imports).
+Driver src/dev/demo/build_stress_page2.py, verification
+verify_stress_page2.py; artifacts .tmp/demo/stress_page2*.
+Measured (trigger_verification2.json):
+- SEG-A E05P04 snow scene (brightest wide window of all 279 textless
+  renders, luma p05 173) borderless: gen9 deletes 95.4%, old ML 4.5%
+  -- the semantic-panel gap now has a REAL-art exhibit where gen9 is
+  strictly worse than the old ML (v1's procedural panel failed both).
+- SEG-B halo: ML ring keep 2/4/8/16/32 = .998/.990/.976/.887/.766;
+  gen9 rings 0.0 kept, bubbles kept 97.3%.
+- SEG-C: legacy burst CANNOT exercise D at any scale -- interior gate
+  fails at display scale (2,255 < 10,000); at 450-640 px interior
+  passes but crossings fall 26->6 (640 drawn rays fuse into wedges).
+  Cloud interior 20,533 / crossings 1 -> correct refusal. No damage.
+- SEG-D: straddler glyph fuses into 633x428 / 119,994-px megacomp ->
+  B' skip; compact control B'-selected (fringe + 634-px pocket).
+  FINDING: every legacy SFX asset ships a white separator outline that
+  severs ink contact -- the legacy training set can never contain the
+  020 frame-merge case; stripped via sfx_ink() to reproduce drawn ink.
+- SEG-E: ML deletes 0.01% / gen9 0.0% of 307,608 black-bg px on the
+  solid-235 + ticked legacy black-bg border variants (shared paused
+  domain).
+Sibling repo untouched (read-only imports; git status clean).
