@@ -2283,3 +2283,34 @@ helps). Same stricter-than-spec-GT enclosure family as 9.18.11.
 No pipeline change; content-side remedy = keep asset edges ~8px off
 border lines; any pipeline-side trapped-channel rule = new scope,
 user-gated with full regression battery.
+
+## 9.18.15 (2026-08-17) -- burst residue re-investigated: Classifier D never detects it (not zone-scope, not the 9.18.14 enclosure class)
+
+User pushed back on 9.18.14, citing manual algorithm steps 46 (wand
+tol120 contiguous:OFF, whole spiky-cloud area) + 52 (unconditional
+full-rect fill) as non-contiguity-dependent mechanisms the prior report
+didn't verify. Direct measurement: find_spiky returns ZERO clouds on
+the current demo page -- zone-scope is moot, D never engages. Two
+independent, measured gate failures: interior area 8,191 < INTERIOR_MIN
+10,000; annulus crossings 16 << CROSSINGS_MIN 100 (real positive 259,
+strongest real negative 29). Root cause: 9.18.10's width_mul=3.0 burst
+fix (correctly eliminated topological enclosure) has the unmeasured
+side effect of merging adjacent thick rays within the BAND_IN..OUT
+annulus, collapsing the crossings signal. All 4,339 residual px are
+sub-white-threshold AA edge pixels ("comp 0"), landing in undefined
+limbo -- new finding, distinct from both the user's zone-too-narrow
+hypothesis and 9.18.14's enclosure framing.
+Attempted signal-level fixes (not threshold hacks), tested against the
+006-crop GT (1 positive/12 negatives) + all 63 candidate comps in
+020p1 BEFORE touching any file: angular polar-unwrap crossing-runs
+FAILS (true positive 107 < six real negatives up to 145); ink-coverage
+fraction FAILS (positive 0.496 < negative 0.713; 020p1 range 0.13-0.94,
+no separation). Threshold-only lowering independently ruled unsafe:
+020p1 comp 568 (real panel, motion-streak light rays, screenshot
+verified) scores CC=16 -- identical to the demo burst -- so no
+threshold value separates them. No safe pipeline-side fix exists
+within this investigation's scope; NO FILE MODIFIED. Regression
+confirmed unaffected: harness2 006-crop hard-assertion gate green
+(D: comp 110 crossings=259, unchanged; final diff 212px/0.0047%,
+pre-existing AA floor); 020p1 nesting gate OK. Report
+burst_detection_gap_2026-08-17_report.md.
