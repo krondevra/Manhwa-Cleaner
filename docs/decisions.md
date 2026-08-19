@@ -2314,3 +2314,9 @@ confirmed unaffected: harness2 006-crop hard-assertion gate green
 (D: comp 110 crossings=259, unchanged; final diff 212px/0.0047%,
 pre-existing AA floor); 020p1 nesting gate OK. Report
 burst_detection_gap_2026-08-17_report.md.
+
+## 9.18.16 (2026-08-17) -- add pipeline-showdown demo GIF to README, move into assets/
+
+Compressed/resized copy (428x1060, 8.3MB) of the E23P02 demo
+comparison GIF built this session; original full-res copy stays in
+.tmp/demo/output (gitignored).
