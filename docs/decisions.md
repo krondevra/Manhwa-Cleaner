@@ -2344,3 +2344,21 @@ post-restructure tree (src/pipeline/, gitignored src/dev/,
 docs/decisions.md, assets/); fixed leftover pre-restructure src/*.py
 path references. Updated the demo GIF (assets/) to the latest E23P02
 comparison run.
+
+## 9.18.19 (2026-08-19) -- fix broken demo GIF on GitHub: absolute raw.githubusercontent.com URL
+
+User reported the README's demo GIF not rendering on GitHub despite
+being correctly committed and pushed (verified byte-identical on the
+remote via git ls-tree/cat-file and the GitHub contents API -- not a
+push/sync problem). Root cause found via GitHub's own
+`POST /markdown` render API: GitHub's renderer rewrites relative
+paths inside markdown `![]()` image syntax to the repo's raw-content
+base, but does NOT do the same for raw HTML `<img src="...">` tags --
+confirmed by rendering the README's exact `<img>` block through the
+API and observing the relative `src` come back completely
+untouched. The browser then resolved it against the wrong base (the
+repo page URL, not raw content), 404ing the image. Fixed by switching
+the `<img src>` to the absolute
+`https://raw.githubusercontent.com/krondevra/Manhwa-Cleaner/main/...`
+URL; re-verified round-trip through the same render API before
+committing.

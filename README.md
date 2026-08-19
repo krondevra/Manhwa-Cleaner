@@ -7,7 +7,7 @@ backgrounds are not reliably handled by either pipeline in this repo yet —
 see "Known limitations" below.
 
 <p align="center">
-  <img src="assets/manhwa_cleaner_pipeline_showdown.gif" alt="Old ML vs current gen9 pipeline on a composited stress-test page">
+  <img src="https://raw.githubusercontent.com/krondevra/Manhwa-Cleaner/main/assets/manhwa_cleaner_pipeline_showdown.gif" alt="Old ML vs current gen9 pipeline on a composited stress-test page">
 </p>
 
 ## Approach
