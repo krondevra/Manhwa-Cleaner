@@ -2385,3 +2385,12 @@ GIF-fix commit, "full snapshot: gen9 + ML pipelines, all model
 checkpoints tracked"); v2.0.0 tagged on this untrack commit
 (gen9-only, no models tracked). No pipeline code, classifier, or
 constant changed.
+
+## 9.18.21 (2026-08-19) -- README: rename gen9 -> "deterministic manual-algorithm port" in prose
+
+The codename "gen9" told readers nothing about what the pipeline
+actually does. Renamed the Approach section's items 5/6 and every
+prose reference accordingly ("classical spiky-cloud pipeline" ->
+"classical OpenCV pipeline", "gen9" -> "deterministic manual-algorithm
+port"); literal code paths (src/pipeline/gen9/) left as-is since
+that's the real directory name.

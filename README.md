@@ -7,7 +7,7 @@ backgrounds are not reliably handled by either pipeline in this repo yet —
 see "Known limitations" below.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/krondevra/Manhwa-Cleaner/main/assets/manhwa_cleaner_pipeline_showdown.gif" alt="Old ML vs current gen9 pipeline on a composited stress-test page">
+  <img src="https://raw.githubusercontent.com/krondevra/Manhwa-Cleaner/main/assets/manhwa_cleaner_pipeline_showdown.gif" alt="Old ML vs current deterministic pipeline on a composited stress-test page">
 </p>
 
 ## Approach
@@ -24,14 +24,16 @@ own. The project moved through:
    manual Photoshop workflow this project automates)
 4. **production tooling** — dataset prep, heuristic evaluation without ground
    truth, hard-case mining
-5. **classical spiky-cloud pipeline** — an OpenCV replication of the manual
+5. **classical OpenCV pipeline** — an OpenCV replication of the manual
    Photoshop spiky-cloud cleaning workflow (`clean_page_v10` production /
-   `clean_page` v12 candidate), superseded by gen9 below; its regression
-   battery and PSD ground-truth extractors carried forward.
-6. **gen9** (`src/pipeline/gen9/`) — a deterministic, no-model port of the
-   full manual Photoshop/Photopea cleaning algorithm: layered Levels/
-   Threshold/Minimum-Maximum image derivatives feed four write-once
-   classifiers (background panel/gutter selection, SFX outline recovery,
+   `clean_page` v12 candidate), superseded by the deterministic
+   manual-algorithm port below; its regression battery and PSD
+   ground-truth extractors carried forward.
+6. **deterministic manual-algorithm port** (`src/pipeline/gen9/`) — a
+   no-model port of the full manual Photoshop/Photopea cleaning
+   algorithm: layered Levels/Threshold/Minimum-Maximum image derivatives
+   feed four write-once classifiers (background panel/gutter selection,
+   SFX outline recovery,
    trapped-pocket detection, spiky-cloud/scream-burst handling), each
    locking its territory so no later stage can re-touch it. Validated
    pixel-exact against hand-cleaned checkpoint PSDs across multiple real
@@ -45,9 +47,9 @@ its base weights' upstream license provenance is incompatible with this
 project's MIT policy, and results did not justify keeping it — the full record
 stays in `docs/ml_strategy_history.md`.
 
-**Current recommended pipeline**: `src/pipeline/gen9/run_hierarchy.py
-<page.png> [out_dir]` — no trained model required, deterministic, and the
-best-measured of the two (above). The earlier ML pipeline
+**Current recommended pipeline**: the deterministic manual-algorithm port,
+`src/pipeline/gen9/run_hierarchy.py <page.png> [out_dir]` — no trained
+model required, and the best-measured of the two (above). The earlier ML pipeline
 (`data/models/10.0-baseline.pt` + `src/pipeline/ml_cleaner.py process ...
 --reclaim-islands`) remains available and is documented in
 `docs/ml_strategy_history.md`.
@@ -73,8 +75,9 @@ and why) — check both before starting new work in either pipeline.
 ## Layout
 ```text
 src/pipeline/            tracked production code
-  gen9/                    current recommended pipeline (deterministic, no
-                           trained model) -- run_hierarchy.py is the entry point
+  gen9/                    deterministic manual-algorithm port, current
+                           recommended pipeline (no trained model) --
+                           run_hierarchy.py is the entry point
   ml_cleaner.py            SmallUNet ML pipeline (train / process)
   longify.py, split.py,
   merge.py                 page-merge and long-strip chunking utilities
@@ -130,12 +133,14 @@ the PepperNCarrotDataset repo's `src/tools/cut_dataset.py` before training.
 
 ## Checkpoints and releases
 `data/models/` (SmallUNet checkpoints, ~14MB each) is gitignored and not
-tracked in this repo — gen9 is the recommended pipeline and needs no
-trained model, and the full checkpoint set (~380MB) is too heavy to carry
-in every clone. The full checkpoint history is preserved in the
+tracked in this repo — the deterministic manual-algorithm port is the
+recommended pipeline and needs no trained model, and the full checkpoint
+set (~380MB) is too heavy to carry in every clone. The full checkpoint
+history is preserved in the
 [v1.0.0 release](../../releases/tag/v1.0.0) (source tarball, all models
 tracked as of that tag) for anyone who wants the legacy ML pipeline.
-[v2.0.0](../../releases/tag/v2.0.0) and later are gen9-only, model-free.
+[v2.0.0](../../releases/tag/v2.0.0) and later carry the deterministic
+pipeline only, model-free.
 
 ## License
 
