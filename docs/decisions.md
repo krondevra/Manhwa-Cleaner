@@ -2327,3 +2327,20 @@ New compressed copy (428x908, 8.1MB) from the refreshed E23P02 run.
 Plain markdown image syntax always renders left-aligned on GitHub;
 wrapped in <p align="center"> (GitHub's markdown renderer allows this
 inline HTML) to actually center it.
+
+## 9.18.18 (2026-08-17) -- README overhaul: correct background-scope claims, document gen9, fix stale paths
+
+Fixed the opening claim: neither pipeline reliably removes dark/black
+or gray backgrounds (measured "zero-signal-on-black" class); scoped
+to near-white backgrounds. Added a "Known limitations" section
+covering that plus the borderless-tinted-panel over-delete class,
+both cited to docs/ml_strategy_history.md and docs/decisions.md.
+Added gen9 as approach step 6 and as the new "Current recommended
+pipeline" (src/pipeline/gen9/run_hierarchy.py) -- deterministic, no
+trained model, measured well under 1% diff against a hand-cleaned
+test page vs ~8-10% for the ML baseline on the same page. ML pipeline
+kept documented as still available. Rewrote Layout to match the
+post-restructure tree (src/pipeline/, gitignored src/dev/,
+docs/decisions.md, assets/); fixed leftover pre-restructure src/*.py
+path references. Updated the demo GIF (assets/) to the latest E23P02
+comparison run.

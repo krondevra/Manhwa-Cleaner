@@ -1,8 +1,10 @@
 # Manhwa Cleaner
-ML pipeline for turning saved manhwa/webtoon chapters into cleaned, transparent
-long-strip PNGs: merge pages → remove background (white/black/gray, gradients,
-artifacts) while preserving frames, speech bubbles, SFX and text → cut into
-frames for downstream use.
+Pipeline for turning saved manhwa/webtoon chapters into cleaned, transparent
+long-strip PNGs: merge pages → remove background (near-white panels, gutters,
+paper texture, and light artifacts) while preserving frames, speech bubbles,
+SFX and text → cut into frames for downstream use. Dark/black and gray
+backgrounds are not reliably handled by either pipeline in this repo yet —
+see "Known limitations" below.
 
 <p align="center">
   <img src="assets/manhwa_cleaner_pipeline_showdown.gif" alt="Old ML vs current gen9 pipeline on a composited stress-test page">
@@ -22,43 +24,75 @@ own. The project moved through:
    manual Photoshop workflow this project automates)
 4. **production tooling** — dataset prep, heuristic evaluation without ground
    truth, hard-case mining
-5. **classical spiky-cloud pipeline** (`src/spiky/pipeline.py`) — an OpenCV
-   replication of the manual Photoshop spiky-cloud cleaning workflow
-   (`clean_page_v10` production / `clean_page` v12 candidate) with its
-   regression battery and PSD ground-truth extractors.
+5. **classical spiky-cloud pipeline** — an OpenCV replication of the manual
+   Photoshop spiky-cloud cleaning workflow (`clean_page_v10` production /
+   `clean_page` v12 candidate), superseded by gen9 below; its regression
+   battery and PSD ground-truth extractors carried forward.
+6. **gen9** (`src/pipeline/gen9/`) — a deterministic, no-model port of the
+   full manual Photoshop/Photopea cleaning algorithm: layered Levels/
+   Threshold/Minimum-Maximum image derivatives feed four write-once
+   classifiers (background panel/gutter selection, SFX outline recovery,
+   trapped-pocket detection, spiky-cloud/scream-burst handling), each
+   locking its territory so no later stage can re-touch it. Validated
+   pixel-exact against hand-cleaned checkpoint PSDs across multiple real
+   chapters; on a held-out hand-cleaned test page it differs from the human
+   reference by well under 1% of page pixels, against ~8–10% for the ML
+   baseline on the same page (see the demo above — the background halo
+   around bubbles/SFX is the ML pipeline's dominant remaining defect class).
 
 A learned CascadePSP refinement stage was evaluated and removed (2026-08-10):
 its base weights' upstream license provenance is incompatible with this
 project's MIT policy, and results did not justify keeping it — the full record
 stays in `docs/ml_strategy_history.md`.
 
-**Current production**: `data/models/10.0-baseline.pt` + `src/ml_cleaner.py
-process ... --reclaim-islands`.
+**Current recommended pipeline**: `src/pipeline/gen9/run_hierarchy.py
+<page.png> [out_dir]` — no trained model required, deterministic, and the
+best-measured of the two (above). The earlier ML pipeline
+(`data/models/10.0-baseline.pt` + `src/pipeline/ml_cleaner.py process ...
+--reclaim-islands`) remains available and is documented in
+`docs/ml_strategy_history.md`.
 
-Full history of that iteration — including abandoned approaches and why they
-were abandoned — is in the git log (`git log --oneline`) and, curated,
-`docs/ml_strategy_history.md` (what's been tried for background isolation
-specifically, what worked, what didn't, and why — check it before starting
-a new ML experiment).
+## Known limitations
+Both pipelines target **near-white** backgrounds specifically:
+- **Dark/black and gray backgrounds are not removed.** Neither pipeline
+  reliably distinguishes gutter-black from dark art — measured
+  near-zero deletion on black-background pages (documented as
+  "zero-signal-on-black" in `docs/ml_strategy_history.md`). Treat this as
+  a paused/unsupported domain, not a bug to work around per-page.
+- **Borderless neutral or gradient-tinted panels can be over-deleted.**
+  A full-bleed panel with no drawn frame and a flat or gently graded near-
+  white tone reads the same as page background to the panel-selection
+  classifier, in both pipelines — the panel's own content is at risk of
+  being swept away entirely. Panels with a drawn border, or clear non-white
+  content, are unaffected.
+
+See `docs/decisions.md` and `docs/ml_strategy_history.md` for the full,
+measured defect-class history (what's been tried, what worked, what didn't,
+and why) — check both before starting new work in either pipeline.
 
 ## Layout
 ```text
-src/            production pipeline scripts (longify, split, merge, cut_samples,
-                ml_cleaner, evaluate, compare, style_analysis, run_style_analysis)
-src/research/   probes, training scripts, and one-off eval/smoke tools not part
-                of the standard cleaning workflow (compare_models_video and others)
-src/spiky/      classical spiky-cloud pipeline (pipeline.py, consolidated from the
-                historical v2-v12 chain -- per-version files live in git history),
-                v26 regression battery/suite, PSD ground-truth extractors
-docs/           command reference (docs/readme.md), strategy history
-                (docs/ml_strategy_history.md)
-notes/          private planning/investigation notes (gitignored, not in the
-                public repo)
+src/pipeline/            tracked production code
+  gen9/                    current recommended pipeline (deterministic, no
+                           trained model) -- run_hierarchy.py is the entry point
+  ml_cleaner.py            SmallUNet ML pipeline (train / process)
+  longify.py, split.py,
+  merge.py                 page-merge and long-strip chunking utilities
+  classifiers/, export/     panel/frame/SFX detector profiles and PSD/sidecar
+                           export helpers
+  jsx/                     Photopea/Photoshop automation scripts
+src/dev/                 experiment scripts, harnesses, and one-off tools --
+                         gitignored, not part of the public repo
+docs/                    command reference (docs/readme.md), decision log
+                         (docs/decisions.md), strategy history
+                         (docs/ml_strategy_history.md, docs/history.md)
+assets/                  README media
 ```
 
 `data/` (dataset, chapter images, trained checkpoints under `data/models/`)
-and `reports/` are generated/copied locally (gitignored) — not tracked.
-See "Training data" below for the expected `data/` layout.
+and all working/notes directories (`.tmp/`) are generated or private
+(gitignored) — not tracked. See "Training data" below for the expected
+`data/` layout.
 
 ## Setup
 ```bash
@@ -86,7 +120,7 @@ Each episode folder is self-contained: every input variant (`initial`,
 an `initial_cleaned/` sibling folder for the universal fully-clean target,
 plus its own `<variant>_cleaned/` sibling folder wherever the ground truth
 legitimately differs (frame/bubble outline kept, SFX/bubble/shape marks
-kept). `src/ml_cleaner.py train` reads
+kept). `src/pipeline/ml_cleaner.py train` reads
 `data/dataset_split/train` and `data/dataset_split/val` by default; see
 `docs/readme.md` for selecting a subset of variants.
 
