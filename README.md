@@ -4,7 +4,9 @@ long-strip PNGs: merge pages → remove background (white/black/gray, gradients,
 artifacts) while preserving frames, speech bubbles, SFX and text → cut into
 frames for downstream use.
 
-![Old ML vs current gen9 pipeline on a composited stress-test page](assets/manhwa_cleaner_pipeline_showdown.gif)
+<p align="center">
+  <img src="assets/manhwa_cleaner_pipeline_showdown.gif" alt="Old ML vs current gen9 pipeline on a composited stress-test page">
+</p>
 
 ## Approach
 The background-removal problem is context-sensitive: the same pixel color can

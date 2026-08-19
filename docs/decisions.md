@@ -2320,3 +2320,10 @@ burst_detection_gap_2026-08-17_report.md.
 Compressed/resized copy (428x1060, 8.3MB) of the E23P02 demo
 comparison GIF built this session; original full-res copy stays in
 .tmp/demo/output (gitignored).
+
+## 9.18.17 (2026-08-17) -- update demo GIF to latest run; center it in README on GitHub
+
+New compressed copy (428x908, 8.1MB) from the refreshed E23P02 run.
+Plain markdown image syntax always renders left-aligned on GitHub;
+wrapped in <p align="center"> (GitHub's markdown renderer allows this
+inline HTML) to actually center it.
