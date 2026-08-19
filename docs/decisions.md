@@ -2362,3 +2362,26 @@ the `<img src>` to the absolute
 `https://raw.githubusercontent.com/krondevra/Manhwa-Cleaner/main/...`
 URL; re-verified round-trip through the same render API before
 committing.
+
+## 9.18.20 (2026-08-19) -- untrack ML model checkpoints from git; recreate v1.0.0/v2.0.0 releases
+
+Repo-hygiene change at the user's explicit request ("recreate releases,
+v1.0.0 everything, v2.0.0 without ML models since they're heavy"), not
+a pipeline change -- no production file touched.
+
+data/models/*.pt + *.json (36 files, ~380MB) had been git-tracked since
+early in the project; gen9 (the recommended pipeline since 9.18.xx) is
+deterministic and needs no trained model, so carrying that weight in
+every clone going forward no longer earns its cost. `git rm --cached`
+on all 36 checkpoint files; .gitignore simplified to a blanket `data/*`
+(dropped the old `!data/models/` carve-out and the legacy 1.0-2.1
+per-file exclusions, now redundant). README's "Checkpoints and
+releases" section updated to point at the v1.0.0 release tarball for
+anyone who needs the full legacy ML checkpoint set.
+
+Releases recreated from scratch (old v1.0.0/v2.0.0 tags+releases
+deleted first): v1.0.0 re-tagged at the pre-untrack HEAD (the 9.18.19
+GIF-fix commit, "full snapshot: gen9 + ML pipelines, all model
+checkpoints tracked"); v2.0.0 tagged on this untrack commit
+(gen9-only, no models tracked). No pipeline code, classifier, or
+constant changed.

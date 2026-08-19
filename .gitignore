@@ -4,18 +4,10 @@ chapters-results/
 chapters-cleaned/
 samples/
 data/*
-!data/models/
-# Legacy models.
-data/models/1.0.json
-data/models/1.0.pt
-data/models/1.1.json
-data/models/1.1.pt
-data/models/1.2.json
-data/models/1.2.pt
-data/models/2.0.json
-data/models/2.0.pt
-data/models/2.1.json
-data/models/2.1.pt
+# Model checkpoints (2026-08-19): untracked from git -- gen9 is the
+# recommended pipeline and needs no model; ML checkpoints (~380MB) are
+# too heavy to carry in every clone. Full set archived in the v1.0.0
+# release tag/tarball for anyone who needs the legacy ML pipeline.
 reports/
 psd/
 __pycache__/

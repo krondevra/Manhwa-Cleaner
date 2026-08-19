@@ -129,8 +129,13 @@ between sessions (regenerable, not required for inference) — regenerate from
 the PepperNCarrotDataset repo's `src/tools/cut_dataset.py` before training.
 
 ## Checkpoints and releases
-Small checkpoints (SmallUNet, ~14MB each) are tracked directly in
-`data/models/`.
+`data/models/` (SmallUNet checkpoints, ~14MB each) is gitignored and not
+tracked in this repo — gen9 is the recommended pipeline and needs no
+trained model, and the full checkpoint set (~380MB) is too heavy to carry
+in every clone. The full checkpoint history is preserved in the
+[v1.0.0 release](../../releases/tag/v1.0.0) (source tarball, all models
+tracked as of that tag) for anyone who wants the legacy ML pipeline.
+[v2.0.0](../../releases/tag/v2.0.0) and later are gen9-only, model-free.
 
 ## License
 
